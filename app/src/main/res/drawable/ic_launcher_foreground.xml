@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108"
+    android:tint="#FFFFFF">
+
+    <group
+        android:scaleX="0.56"
+        android:scaleY="0.56"
+        android:translateX="27"
+        android:translateY="27">
+        <!-- Brain icon with AI concept -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,24C42,24 32,34 32,46C32,54.8 37.2,62.2 45,65.2V74C45,75.7 46.3,77 48,77H60C61.7,77 63,75.7 63,74V65.2C70.8,62.2 76,54.8 76,46C76,34 66,24 54,24ZM60,62V72H48V62H45C39.5,62 35,57.5 35,52C35,46.5 39.5,42 45,42H46.5C47.9,42 49,40.9 49,39.5V36C49,34.9 49.9,34 51,34H57C58.1,34 59,34.9 59,36V39.5C59,40.9 60.1,42 61.5,42H63C68.5,42 73,46.5 73,52C73,57.5 68.5,62 63,62H60Z"/>
+        <!-- Circuit lines to represent AI/machine learning -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M32,46H26"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M82,46H76"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,24V18"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M35,35L30,30"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M73,35L78,30"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,81V77"/>
+        
+        <!-- Small dots to represent neural network nodes -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M26,46m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M82,46m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,18m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M30,30m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M78,30m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,84m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
+    </group>
+</vector>

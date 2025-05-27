@@ -1,0 +1,817 @@
+package com.aiassistant.core;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+
+// Import our helper classes instead of ambiguous direct imports
+import utils.AIController;
+import utils.AIControllerHelper;
+import utils.AutoAIControllerImportHelper;
+import utils.BitmapHelper;
+import utils.ContextCompatHelper;
+import utils.DeepRLModelHelper;
+import utils.GameRuleHelper;
+import utils.GameRuleUnderstandingHelper;
+import utils.GameStateHelper;
+import utils.GameTrainerHelper;
+import utils.JavaLangImportHelper;
+import utils.MLClassResolver;
+import utils.NLPIntegrationHelper;
+import utils.NLPIntegrationHelperWrapper;
+import utils.NaturalLanguageProcessor;
+import utils.ObjectDetector;
+import utils.PredictiveActionSystemHelper;
+import utils.RectHelper;
+import utils.RuleExtractionSystemHelper;
+import utils.ScreenshotManagerHelper;
+import utils.UIElement;
+import utils.UIElementHelper;
+import utils.UIElementTypeConverter;
+
+/**
+ * AutoAIController provides autonomous AI control over Android apps.
+ * It combines various AI subsystems for predictive action recommendation,
+ * game rule understanding, deep reinforcement learning, etc.
+ */
+public class AutoAIController implements AIController {
+    private static final String TAG = "AutoAIController";
+    
+    // System constants
+    private static final int UPDATE_INTERVAL_MS = 100;
+    private static final int MAX_CONSECUTIVE_ERRORS = 5;
+    private static final int AUTO_RESTART_THRESHOLD_MS = 30000;
+    private static final float DEFAULT_CONFIDENCE_THRESHOLD = 0.75f;
+    
+    // Android context
+    private Context context;
+    
+    // AI subsystems - use Object to avoid ambiguous imports
+    private Object predictiveSystem;
+    private Object ruleUnderstanding;
+    private Object deepRLModel;
+    private Object gameTrainer;
+    private Object screenshotManager;
+    private Object ruleExtractor;
+    private NaturalLanguageProcessor nlProcessor;
+    private NLPIntegrationHelper nlpHelper;
+    
+    // Runtime state
+    private boolean isRunning;
+    private boolean isInitialized;
+    private int consecutiveErrors;
+    private long lastUpdateTime;
+    private long systemStartTime;
+    private float confidenceThreshold;
+    private String activeGameType;
+    
+    // Threading
+    private final Handler mainHandler;
+    private final Executor backgroundExecutor;
+    private final Runnable updateRunnable;
+    
+    // State tracking
+    private Bitmap lastScreenshot;
+    private Map<String, Object> lastGameState;
+    private List<UIElement> lastDetectedElements;
+    private String lastRecommendedAction;
+    private boolean isAutoMode;
+    
+    // Performance tracking
+    private int totalActionsRecommended;
+    private int totalActionsExecuted;
+    private int totalScreensAnalyzed;
+    private Map<String, Integer> actionTypeFrequency;
+    
+    /**
+     * Constructor for AutoAIController.
+     * 
+     * @param context Android application context
+     */
+    public AutoAIController(Context context) {
+        this.context = context;
+        
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.backgroundExecutor = Executors.newSingleThreadExecutor();
+        this.updateRunnable = this::updateLoop;
+        
+        this.isRunning = false;
+        this.isInitialized = false;
+        this.consecutiveErrors = 0;
+        this.lastUpdateTime = 0;
+        this.confidenceThreshold = DEFAULT_CONFIDENCE_THRESHOLD;
+        this.isAutoMode = false;
+        
+        this.lastGameState = new HashMap<>();
+        this.lastDetectedElements = new ArrayList<>();
+        this.actionTypeFrequency = new HashMap<>();
+        
+        this.totalActionsRecommended = 0;
+        this.totalActionsExecuted = 0;
+        this.totalScreensAnalyzed = 0;
+    }
+    
+    /**
+     * Get the AIController instance
+     * @param context The context
+     * @return The AIController instance
+     */
+    public static AIController getInstance(Context context) {
+        return (AIController)AIControllerHelper.getControllerInstance(context);
+    }
+    
+    /**
+     * Initialize all AI subsystems.
+     * 
+     * @return True if successfully initialized
+     */
+    @Override
+    public boolean initialize() {
+        if (isInitialized) {
+            return true;
+        }
+        
+        try {
+            Log.d(TAG, "Initializing AutoAIController");
+            
+            // Create utils.Context wrapper for compatibility
+            utils.Context utilsContext = ContextCompatHelper.fromAndroidContext(context);
+            
+            // Initialize subsystems using our helper classes
+            screenshotManager = AutoAIControllerImportHelper.createScreenshotManager();
+            if (screenshotManager == null) {
+                Log.e(TAG, "Failed to create ScreenshotManager");
+                return false;
+            }
+            
+            // Initialize predictive action system
+            predictiveSystem = AutoAIControllerImportHelper.createPredictiveActionSystem();
+            
+            // Initialize game rule understanding system
+            ruleUnderstanding = AutoAIControllerImportHelper.createGameRuleUnderstanding();
+            
+            // Initialize deep RL model
+            deepRLModel = AutoAIControllerImportHelper.createDeepRLModel();
+            
+            // Initialize game trainer
+            gameTrainer = AutoAIControllerImportHelper.createGameTrainer();
+            
+            // Initialize rule extraction system
+            ruleExtractor = AutoAIControllerImportHelper.createRuleExtractionSystem();
+            
+            // Initialize NLP systems
+            nlProcessor = NaturalLanguageProcessor.getInstance();
+            nlpHelper = NLPIntegrationHelper.getInstance();
+            
+            isInitialized = true;
+            Log.d(TAG, "AutoAIController initialization successful");
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error initializing AutoAIController", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Start the controller and all subsystems.
+     * 
+     * @return True if successfully started
+     */
+    @Override
+    public boolean start() {
+        if (!isInitialized && !initialize()) {
+            Log.e(TAG, "Cannot start, initialization failed");
+            return false;
+        }
+        
+        if (isRunning) {
+            Log.d(TAG, "Already running, ignoring start request");
+            return true;
+        }
+        
+        try {
+            Log.d(TAG, "Starting AutoAIController");
+            
+            // Start predictive system
+            PredictiveActionSystemHelper.start(predictiveSystem);
+            
+            // Start other subsystems as needed
+            
+            isRunning = true;
+            systemStartTime = System.currentTimeMillis();
+            lastUpdateTime = systemStartTime;
+            consecutiveErrors = 0;
+            
+            // Schedule update loop
+            mainHandler.post(updateRunnable);
+            
+            Log.d(TAG, "AutoAIController started successfully");
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting AutoAIController", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Stop the controller and all subsystems.
+     * 
+     * @return True if successfully stopped
+     */
+    @Override
+    public boolean stop() {
+        if (!isRunning) {
+            Log.d(TAG, "Already stopped, ignoring stop request");
+            return true;
+        }
+        
+        try {
+            Log.d(TAG, "Stopping AutoAIController");
+            
+            // Remove update callback
+            mainHandler.removeCallbacks(updateRunnable);
+            
+            // Stop predictive system
+            PredictiveActionSystemHelper.stop(predictiveSystem);
+            
+            // Stop other subsystems as needed
+            
+            isRunning = false;
+            
+            Log.d(TAG, "AutoAIController stopped successfully");
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping AutoAIController", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Check if controller is currently running.
+     * 
+     * @return True if running
+     */
+    @Override
+    public boolean isRunning() {
+        return isRunning;
+    }
+    
+    /**
+     * Main update loop for controller processing.
+     */
+    private void updateLoop() {
+        if (!isRunning) {
+            return;
+        }
+        
+        try {
+            long currentTime = System.currentTimeMillis();
+            long elapsedTime = currentTime - lastUpdateTime;
+            
+            // Rate limiting
+            if (elapsedTime < UPDATE_INTERVAL_MS) {
+                mainHandler.postDelayed(updateRunnable, UPDATE_INTERVAL_MS - elapsedTime);
+                return;
+            }
+            
+            lastUpdateTime = currentTime;
+            
+            // Capture new screenshot
+            lastScreenshot = ScreenshotManagerHelper.captureScreenshot(screenshotManager);
+            if (lastScreenshot != null) {
+                backgroundExecutor.execute(this::processScreenshotAsync);
+            }
+            
+            // Check for auto-restart if needed
+            if (currentTime - systemStartTime > AUTO_RESTART_THRESHOLD_MS &&
+                consecutiveErrors > MAX_CONSECUTIVE_ERRORS) {
+                Log.w(TAG, "Auto-restarting due to consecutive errors");
+                stop();
+                initialize();
+                start();
+                return;
+            }
+            
+            // Reschedule update
+            mainHandler.postDelayed(updateRunnable, UPDATE_INTERVAL_MS);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error in update loop", e);
+            consecutiveErrors++;
+            
+            // Reschedule update even if there was an error
+            mainHandler.postDelayed(updateRunnable, UPDATE_INTERVAL_MS);
+        }
+    }
+    
+    /**
+     * Process screenshot in background thread.
+     */
+    private void processScreenshotAsync() {
+        try {
+            // Detect UI elements
+            lastDetectedElements = detectUIElements(lastScreenshot);
+            
+            // Process with predictive system
+            PredictiveActionSystemHelper.processFrame(predictiveSystem, lastScreenshot, lastDetectedElements);
+            
+            // Get current state
+            Object currentState = PredictiveActionSystemHelper.getCurrentState(predictiveSystem);
+            
+            if (currentState != null) {
+                // Convert to game state for RL model
+                Map<String, Object> stateData = PredictiveActionSystemHelper.getStateData(currentState);
+                lastGameState = stateData;
+                
+                // Process with rule understanding
+                GameRuleUnderstandingHelper.processGameState(ruleUnderstanding, stateData, lastDetectedElements);
+                
+                // Process with RL model
+                float[] features = DeepRLModelHelper.convertToFeatureVector(deepRLModel, stateData);
+                DeepRLModelHelper.processState(deepRLModel, features);
+                
+                // Get action recommendations if in auto mode
+                if (isAutoMode) {
+                    getAndExecuteRecommendedAction();
+                }
+            }
+            
+            totalScreensAnalyzed++;
+            consecutiveErrors = 0;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing screenshot", e);
+            consecutiveErrors++;
+        }
+    }
+    
+    /**
+     * Get recommended action and execute it if confidence is high enough.
+     */
+    private void getAndExecuteRecommendedAction() {
+        try {
+            // Get action recommendation from predictive system
+            Object prediction = PredictiveActionSystemHelper.getPredictedAction(predictiveSystem, lastGameState);
+            
+            if (prediction != null) {
+                float confidence = PredictiveActionSystemHelper.getConfidence(prediction);
+                if (confidence >= confidenceThreshold) {
+                    String actionType = PredictiveActionSystemHelper.getActionType(prediction);
+                    int x = PredictiveActionSystemHelper.getActionX(prediction);
+                    int y = PredictiveActionSystemHelper.getActionY(prediction);
+                    
+                    // Record the recommendation
+                    lastRecommendedAction = actionType;
+                    totalActionsRecommended++;
+                    
+                    // Update frequency counter
+                    actionTypeFrequency.put(actionType, 
+                        actionTypeFrequency.getOrDefault(actionType, 0) + 1);
+                    
+                    // Execute the action
+                    boolean result = false;
+                    
+                    switch (actionType.toLowerCase()) {
+                        case "click":
+                        case "tap":
+                            result = clickAction(x, y, null);
+                            break;
+                            
+                        case "longpress":
+                        case "long_press":
+                            result = longPressAction(x, y, null);
+                            break;
+                            
+                        case "swipe":
+                            // Additional parameters would be needed from prediction
+                            int endX = x + 100; // Default values
+                            int endY = y + 100;
+                            result = swipeAction(x, y, endX, endY, 300, null);
+                            break;
+                    }
+                    
+                    if (result) {
+                        totalActionsExecuted++;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error executing recommended action", e);
+        }
+    }
+    
+    /**
+     * Process a screenshot for analysis.
+     * 
+     * @param screenshot Screenshot to analyze
+     * @return Analysis results
+     */
+    @Override
+    public Map<String, Object> processScreenshot(Bitmap screenshot) {
+        Map<String, Object> results = new HashMap<>();
+        
+        try {
+            if (screenshot == null) {
+                return results;
+            }
+            
+            // Detect UI elements
+            List<UIElement> elements = detectUIElements(screenshot);
+            results.put("elements", elements);
+            results.put("elementCount", elements.size());
+            
+            // Process with predictive system
+            PredictiveActionSystemHelper.processFrame(predictiveSystem, screenshot, elements);
+            
+            // Get current state
+            Object currentState = PredictiveActionSystemHelper.getCurrentState(predictiveSystem);
+            
+            if (currentState != null) {
+                Map<String, Object> stateData = PredictiveActionSystemHelper.getStateData(currentState);
+                results.put("gameState", stateData);
+                
+                // Get recommendations
+                Object prediction = PredictiveActionSystemHelper.getPredictedAction(predictiveSystem, stateData);
+                
+                if (prediction != null) {
+                    Map<String, Object> actionData = new HashMap<>();
+                    actionData.put("type", PredictiveActionSystemHelper.getActionType(prediction));
+                    actionData.put("x", PredictiveActionSystemHelper.getActionX(prediction));
+                    actionData.put("y", PredictiveActionSystemHelper.getActionY(prediction));
+                    actionData.put("confidence", PredictiveActionSystemHelper.getConfidence(prediction));
+                    
+                    results.put("recommendedAction", actionData);
+                }
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error in processScreenshot", e);
+        }
+        
+        return results;
+    }
+    
+    /**
+     * Detect UI elements from screenshot.
+     * 
+     * @param screenshot Screenshot to analyze
+     * @return List of detected UI elements
+     */
+    @Override
+    public List<UIElement> detectUIElements(Bitmap screenshot) {
+        List<UIElement> elements = new ArrayList<>();
+        
+        try {
+            if (screenshot == null) {
+                return elements;
+            }
+            
+            // Use the object detector if available
+            ObjectDetector detector = ObjectDetector.getInstance();
+            if (detector != null) {
+                // Convert detected objects to UI elements
+                List<Object> detectedObjects = detector.detectObjects(screenshot);
+                
+                for (Object obj : detectedObjects) {
+                    UIElement element = createUIElementFromObject(obj);
+                    if (element != null) {
+                        elements.add(element);
+                    }
+                }
+            }
+            
+            // Use UI element detector system if available
+            if (elements.isEmpty()) {
+                // Use AutoAIControllerImportHelper to get UI elements
+                List<Object> detectedElements = AutoAIControllerImportHelper.detectUIElements(screenshot);
+                
+                // Convert to UIElement type
+                for (Object obj : detectedElements) {
+                    if (obj instanceof UIElement) {
+                        elements.add((UIElement) obj);
+                    } else {
+                        UIElement element = (UIElement) UIElementTypeConverter.convertUIElement(
+                            obj, "utils");
+                        if (element != null) {
+                            elements.add(element);
+                        }
+                    }
+                }
+            }
+            
+            // Create at least one element covering the whole screen if none detected
+            if (elements.isEmpty()) {
+                UIElement fullScreenElement = new UIElement();
+                fullScreenElement.setBounds(new android.graphics.Rect(0, 0, screenshot.getWidth(), screenshot.getHeight()));
+                fullScreenElement.setType("SCREEN");
+                fullScreenElement.setClickable(true);
+                elements.add(fullScreenElement);
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error detecting UI elements", e);
+        }
+        
+        return elements;
+    }
+    
+    /**
+     * Create a UIElement from a detected object.
+     * 
+     * @param obj Detected object
+     * @return UIElement representation
+     */
+    private UIElement createUIElementFromObject(Object obj) {
+        try {
+            UIElement element = new UIElement();
+            
+            // Set bounds
+            android.graphics.Rect bounds = RectHelper.toAndroidRect(obj);
+            element.setBounds(bounds);
+            
+            // Set type and other properties if available
+            try {
+                java.lang.reflect.Method getTypeMethod = obj.getClass().getMethod("getType");
+                Object type = getTypeMethod.invoke(obj);
+                element.setType(type != null ? type.toString() : "UNKNOWN");
+            } catch (Exception e) {
+                element.setType("UNKNOWN");
+            }
+            
+            return element;
+        } catch (Exception e) {
+            Log.e(TAG, "Error creating UI element from object", e);
+            return null;
+        }
+    }
+    
+    /**
+     * Perform a click action.
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @param extras Extra parameters
+     * @return True if successful
+     */
+    @Override
+    public boolean clickAction(int x, int y, Map<String, Object> extras) {
+        try {
+            // Find clicked element
+            UIElement element = findElementAt(x, y);
+            
+            if (element != null) {
+                return tapOnElement(element);
+            } else {
+                return tapAt(x, y);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error executing click action", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Perform a long press action.
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @param extras Extra parameters
+     * @return True if successful
+     */
+    @Override
+    public boolean longPressAction(int x, int y, Map<String, Object> extras) {
+        try {
+            // Process with helpers to simulate long press
+            return AutoAIControllerImportHelper.executeAction("longpress", 
+                createPositionObject(x, y));
+        } catch (Exception e) {
+            Log.e(TAG, "Error executing long press action", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Perform a swipe action.
+     * 
+     * @param startX Start X coordinate
+     * @param startY Start Y coordinate
+     * @param endX End X coordinate
+     * @param endY End Y coordinate
+     * @param duration Duration in milliseconds
+     * @param extras Extra parameters
+     * @return True if successful
+     */
+    @Override
+    public boolean swipeAction(int startX, int startY, int endX, int endY, 
+                              int duration, Map<String, Object> extras) {
+        try {
+            // Create a swipe action object
+            Map<String, Object> swipeParams = new HashMap<>();
+            swipeParams.put("startX", startX);
+            swipeParams.put("startY", startY);
+            swipeParams.put("endX", endX);
+            swipeParams.put("endY", endY);
+            swipeParams.put("duration", duration);
+            
+            // Execute swipe action
+            return AutoAIControllerImportHelper.executeAction("swipe", swipeParams);
+        } catch (Exception e) {
+            Log.e(TAG, "Error executing swipe action", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Find a UI element at specific coordinates.
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return UIElement at the position or null
+     */
+    private UIElement findElementAt(int x, int y) {
+        if (lastDetectedElements == null || lastDetectedElements.isEmpty()) {
+            return null;
+        }
+        
+        // Check each element
+        for (UIElement element : lastDetectedElements) {
+            if (element != null) {
+                android.graphics.Rect bounds = element.getBounds();
+                if (bounds != null && bounds.contains(x, y)) {
+                    return element;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Create a position object for action execution.
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return Position object
+     */
+    private Object createPositionObject(int x, int y) {
+        try {
+            // Create a simple map with coordinates
+            Map<String, Integer> position = new HashMap<>();
+            position.put("x", x);
+            position.put("y", y);
+            return position;
+        } catch (Exception e) {
+            Log.e(TAG, "Error creating position object", e);
+            return null;
+        }
+    }
+    
+    /**
+     * Set the game type.
+     * 
+     * @param gameType Game type to set
+     */
+    @Override
+    public void setGameType(Object gameType) {
+        if (gameType == null) {
+            return;
+        }
+        
+        try {
+            // Convert gameType to string if needed
+            this.activeGameType = gameType.toString();
+            
+            // Set on all subsystems
+            MLClassResolver.setGameType(predictiveSystem, gameType);
+            MLClassResolver.setGameType(ruleUnderstanding, gameType);
+            MLClassResolver.setGameType(deepRLModel, gameType);
+            MLClassResolver.setGameType(ruleExtractor, gameType);
+            
+            Log.d(TAG, "Game type set to: " + activeGameType);
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting game type", e);
+        }
+    }
+    
+    /**
+     * Get the current game type.
+     * 
+     * @return Current game type
+     */
+    @Override
+    public Object getGameType() {
+        return activeGameType;
+    }
+    
+    /**
+     * Tap on a UI element.
+     * 
+     * @param element The element to tap
+     * @return True if successful
+     */
+    @Override
+    public boolean tapOnElement(UIElement element) {
+        if (element == null) {
+            return false;
+        }
+        
+        try {
+            // Get element center coordinates
+            int centerX = UIElementHelper.getCenterX(element);
+            int centerY = UIElementHelper.getCenterY(element);
+            
+            // Perform tap at coordinates
+            return tapAt(centerX, centerY);
+        } catch (Exception e) {
+            Log.e(TAG, "Error tapping on element", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Tap at specific coordinates.
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return True if successful
+     */
+    @Override
+    public boolean tapAt(int x, int y) {
+        try {
+            // Use AutoAIControllerImportHelper to execute tap action
+            return AutoAIControllerImportHelper.executeAction("tap", 
+                createPositionObject(x, y));
+        } catch (Exception e) {
+            Log.e(TAG, "Error tapping at coordinates", e);
+            return false;
+        }
+    }
+    
+    /**
+     * Process a command.
+     * 
+     * @param command The command to process
+     * @return The result
+     */
+    @Override
+    public Object processCommand(String command) {
+        if (command == null || command.isEmpty()) {
+            return null;
+        }
+        
+        try {
+            // Use the NLP helper to process the command
+            return NLPIntegrationHelperWrapper.processCommand(nlpHelper, command, this, lastGameState);
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing command", e);
+            return null;
+        }
+    }
+    
+    /**
+     * Get the current state.
+     * 
+     * @return The current state
+     */
+    @Override
+    public Object getCurrentState() {
+        return lastGameState;
+    }
+    
+    /**
+     * Register an NLP helper.
+     * 
+     * @param nlpHelper The NLP helper to register
+     */
+    @Override
+    public void registerNLPHelper(Object nlpHelper) {
+        if (nlpHelper != null) {
+            this.nlpHelper = (NLPIntegrationHelper) nlpHelper;
+        }
+    }
+    
+    /**
+     * Set current game target lives
+     * @param lives Number of lives
+     */
+    @Override
+    public void setCurrentGameTargetLives(int lives) {
+        try {
+            // Set target lives in game state
+            if (lastGameState != null) {
+                lastGameState.put("targetLives", lives);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting current game target lives", e);
+        }
+    }
+}

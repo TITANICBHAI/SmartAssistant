@@ -1,0 +1,1824 @@
+package com.aiassistant.analysis;
+
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.PointF;
+import android.graphics.Rect;
+import android.util.Log;
+
+import com.aiassistant.core.AIController;
+import com.aiassistant.models.GameState;
+import com.aiassistant.utils.ElementDetector;
+
+import org.tensorflow.lite.Interpreter;
+
+import java.io.File;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Game scene analyzer that processes screen images to detect game state
+ * Based on element_detector.py
+ */
+public class GameSceneAnalyzer {
+    private static final String TAG = "GameSceneAnalyzer";
+    
+    // Game information
+    private String packageName;
+    private AIController.GameType gameType;
+    
+    // Element detector
+    private ElementDetector elementDetector;
+    
+    // Cached models
+    private Interpreter objectDetectionModel;
+    private Interpreter segmentationModel;
+    private Interpreter enemyDetectionModel;
+    
+    // Object detection parameters
+    private float detectionThreshold = 0.6f;
+    private int maxDetections = 10;
+    
+    // Inference parameters
+    private int imageWidth = 416;  // Default for many models
+    private int imageHeight = 416;
+    
+    // Cached results for UI update
+    private Map<String, Object> lastResults;
+    
+    // Known enemy colors for different games
+    private Map<AIController.GameType, int[]> enemyColors;
+    
+    /**
+     * Create a game scene analyzer
+     */
+    public GameSceneAnalyzer(String packageName, AIController.GameType gameType, ElementDetector elementDetector) {
+        this.packageName = packageName;
+        this.gameType = gameType;
+        this.elementDetector = elementDetector;
+        
+        this.lastResults = new ConcurrentHashMap<>();
+        
+        // Initialize enemy colors
+        initializeEnemyColors();
+        
+        // Initialize appropriate models for the game type
+        initializeModels();
+    }
+    
+    /**
+     * Initialize enemy colors for different games
+     */
+    private void initializeEnemyColors() {
+        enemyColors = new HashMap<>();
+        
+        // PUBG Mobile (red names/markers)
+        enemyColors.put(AIController.GameType.PUBG_MOBILE, new int[] {
+            Color.rgb(255, 0, 0),      // Red
+            Color.rgb(255, 50, 50),    // Light red
+            Color.rgb(200, 0, 0)       // Dark red
+        });
+        
+        // Free Fire (red markers)
+        enemyColors.put(AIController.GameType.FREE_FIRE, new int[] {
+            Color.rgb(255, 0, 0),      // Red
+            Color.rgb(255, 60, 60),    // Light red
+            Color.rgb(180, 0, 0)       // Dark red
+        });
+        
+        // Generic FPS (red/orange)
+        enemyColors.put(AIController.GameType.FPS, new int[] {
+            Color.rgb(255, 0, 0),      // Red
+            Color.rgb(255, 60, 0),     // Red-orange
+            Color.rgb(200, 0, 0)       // Dark red
+        });
+        
+        // MOBAs (red health bars)
+        enemyColors.put(AIController.GameType.POKEMON_UNITE, new int[] {
+            Color.rgb(255, 0, 0),      // Red
+            Color.rgb(255, 60, 60)     // Light red
+        });
+        enemyColors.put(AIController.GameType.MOBA, new int[] {
+            Color.rgb(255, 0, 0),      // Red
+            Color.rgb(255, 60, 60)     // Light red
+        });
+        
+        // Generic default (red)
+        enemyColors.put(AIController.GameType.OTHER, new int[] {
+            Color.rgb(255, 0, 0),      // Red
+        });
+    }
+    
+    /**
+     * Initialize models appropriate for the game type
+     */
+    private void initializeModels() {
+        // Attempt to load appropriate models (non-critical)
+        try {
+            // For FPS games, load enemy detection model
+            if (gameType == AIController.GameType.PUBG_MOBILE || 
+                gameType == AIController.GameType.FREE_FIRE || 
+                gameType == AIController.GameType.FPS) {
+                
+                loadEnemyDetectionModel();
+            }
+            
+            // For RPGs and MOBAs, load object segmentation model
+            if (gameType == AIController.GameType.RPG || 
+                gameType == AIController.GameType.POKEMON_UNITE || 
+                gameType == AIController.GameType.MOBA) {
+                
+                loadSegmentationModel();
+            }
+            
+            // For all games, load object detection model
+            loadObjectDetectionModel();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading models: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Load enemy detection model
+     */
+    private void loadEnemyDetectionModel() {
+        try {
+            // Check for model file
+            File modelFile = new File("models/enemy_detection_" + gameType.toString().toLowerCase() + ".tflite");
+            if (!modelFile.exists()) {
+                modelFile = new File("models/enemy_detection_generic.tflite");
+            }
+            
+            if (modelFile.exists()) {
+                enemyDetectionModel = new Interpreter(modelFile);
+                Log.d(TAG, "Loaded enemy detection model: " + modelFile.getPath());
+            } else {
+                Log.w(TAG, "No enemy detection model found");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading enemy detection model: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Load segmentation model
+     */
+    private void loadSegmentationModel() {
+        try {
+            // Check for model file
+            File modelFile = new File("models/segmentation_" + gameType.toString().toLowerCase() + ".tflite");
+            if (!modelFile.exists()) {
+                modelFile = new File("models/segmentation_generic.tflite");
+            }
+            
+            if (modelFile.exists()) {
+                segmentationModel = new Interpreter(modelFile);
+                Log.d(TAG, "Loaded segmentation model: " + modelFile.getPath());
+            } else {
+                Log.w(TAG, "No segmentation model found");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading segmentation model: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Load object detection model
+     */
+    private void loadObjectDetectionModel() {
+        try {
+            // Check for model file
+            File modelFile = new File("models/object_detection_" + gameType.toString().toLowerCase() + ".tflite");
+            if (!modelFile.exists()) {
+                modelFile = new File("models/object_detection_generic.tflite");
+            }
+            
+            if (modelFile.exists()) {
+                objectDetectionModel = new Interpreter(modelFile);
+                Log.d(TAG, "Loaded object detection model: " + modelFile.getPath());
+            } else {
+                Log.w(TAG, "No object detection model found");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading object detection model: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Process a screen image to update game state
+     */
+    public GameState processScreenImage(Bitmap image, GameState currentState) {
+        if (image == null || currentState == null) return currentState;
+        
+        // Clear previous results
+        lastResults.clear();
+        
+        // Mark that we're starting analysis
+        lastResults.put("analysis_started", System.currentTimeMillis());
+        
+        try {
+            // Process different aspects based on game type
+            switch (gameType) {
+                case PUBG_MOBILE:
+                case FREE_FIRE:
+                case FPS:
+                    processFPSImage(image, currentState);
+                    break;
+                    
+                case CLASH_OF_CLANS:
+                case STRATEGY:
+                    processStrategyImage(image, currentState);
+                    break;
+                    
+                case POKEMON_UNITE:
+                case MOBA:
+                    processMOBAImage(image, currentState);
+                    break;
+                    
+                case RPG:
+                    processRPGImage(image, currentState);
+                    break;
+                    
+                default:
+                    processGenericImage(image, currentState);
+                    break;
+            }
+            
+            // Detect health bars for all game types
+            detectHealthBars(image, currentState);
+            
+            // Detect UI elements
+            detectUIElements(image, currentState);
+            
+            // Common processing for all games
+            detectGameMode(image, currentState);
+            
+            // Update state with results
+            currentState.setScreenAnalysisResults(lastResults);
+            
+            // Update state
+            // Manually update the game state as the method might not be available in all versions
+            if (currentState != null) {
+                try {
+                    currentState.updateFromScreenAnalysis();
+                } catch (NoSuchMethodError e) {
+                    Log.e(TAG, "Method updateFromScreenAnalysis() not found: " + e.getMessage());
+                    // Fallback: Manually extract useful data from screenAnalysisResults
+                    // This allows older versions of GameState to still work
+                    updateStateFromResults(currentState);
+                }
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing screen image: " + e.getMessage());
+        }
+        
+        // Mark that we're done analysis
+        lastResults.put("analysis_completed", System.currentTimeMillis());
+        lastResults.put("analysis_duration", 
+            (long)lastResults.get("analysis_completed") - (long)lastResults.get("analysis_started"));
+        
+        return currentState;
+    }
+    
+    /**
+     * Process an FPS game image
+     */
+    private void processFPSImage(Bitmap image, GameState currentState) {
+        // For FPS games, most important is enemy detection
+        detectEnemiesInImage(image, currentState);
+        
+        // Also check for ammo counter and other HUD elements
+        detectHudElements(image, currentState);
+    }
+    
+    /**
+     * Process a strategy game image
+     */
+    private void processStrategyImage(Bitmap image, GameState currentState) {
+        // For strategy games, detect resources and units
+        detectResources(image, currentState);
+        detectUnits(image, currentState);
+    }
+    
+    /**
+     * Process a MOBA game image
+     */
+    private void processMOBAImage(Bitmap image, GameState currentState) {
+        // For MOBAs, detect abilities and champions
+        detectAbilities(image, currentState);
+        detectChampions(image, currentState);
+    }
+    
+    /**
+     * Process an RPG game image
+     */
+    private void processRPGImage(Bitmap image, GameState currentState) {
+        // For RPGs, detect inventory, quests, and NPCs
+        detectInventory(image, currentState);
+        detectQuestMarkers(image, currentState);
+        detectCharacters(image, currentState);
+    }
+    
+    /**
+     * Process a generic game image
+     */
+    private void processGenericImage(Bitmap image, GameState currentState) {
+        // For unknown games, run basic detection
+        detectBasicElements(image, currentState);
+    }
+    
+    /**
+     * Detect enemies in image (for FPS games)
+     */
+    private void detectEnemiesInImage(Bitmap image, GameState currentState) {
+        // Get current enemy detection results
+        boolean enemiesDetected = false;
+        int enemyCount = 0;
+        Map<Integer, float[]> enemyPositions = new HashMap<>();
+        Map<Integer, Float> enemyDistances = new HashMap<>();
+        
+        // First attempt: use neural network if available
+        if (enemyDetectionModel != null) {
+            try {
+                // Resize image for model input
+                Bitmap resizedImage = Bitmap.createScaledBitmap(image, imageWidth, imageHeight, true);
+                
+                // Prepare input buffer
+                ByteBuffer inputBuffer = ByteBuffer.allocateDirect(imageWidth * imageHeight * 3 * 4);
+                inputBuffer.order(ByteOrder.nativeOrder());
+                inputBuffer.rewind();
+                
+                // Fill input buffer with image data
+                for (int y = 0; y < imageHeight; y++) {
+                    for (int x = 0; x < imageWidth; x++) {
+                        int pixel = resizedImage.getPixel(x, y);
+                        inputBuffer.putFloat(((pixel >> 16) & 0xFF) / 255.0f);
+                        inputBuffer.putFloat(((pixel >> 8) & 0xFF) / 255.0f);
+                        inputBuffer.putFloat((pixel & 0xFF) / 255.0f);
+                    }
+                }
+                
+                // Prepare output buffers
+                float[][][] outputLocations = new float[1][maxDetections][4];
+                float[][] outputClasses = new float[1][maxDetections];
+                float[][] outputScores = new float[1][maxDetections];
+                float[] numDetections = new float[1];
+                
+                Map<Integer, Object> outputs = new HashMap<>();
+                outputs.put(0, outputLocations);
+                outputs.put(1, outputClasses);
+                outputs.put(2, outputScores);
+                outputs.put(3, numDetections);
+                
+                // Run inference
+                enemyDetectionModel.runForMultipleInputsOutputs(new Object[] {inputBuffer}, outputs);
+                
+                // Process results
+                int numDetected = (int) numDetections[0];
+                
+                for (int i = 0; i < numDetected; i++) {
+                    // Check classification score
+                    if (outputScores[0][i] >= detectionThreshold) {
+                        // Class 0 is usually enemy in custom models
+                        if (outputClasses[0][i] == 0) {
+                            enemiesDetected = true;
+                            enemyCount++;
+                            
+                            // Get normalized coordinates (0-1)
+                            float top = outputLocations[0][i][0];
+                            float left = outputLocations[0][i][1];
+                            float bottom = outputLocations[0][i][2];
+                            float right = outputLocations[0][i][3];
+                            
+                            // Calculate center point
+                            float centerX = (left + right) / 2;
+                            float centerY = (top + bottom) / 2;
+                            
+                            // Estimate distance (based on box size)
+                            float width = right - left;
+                            float height = bottom - top;
+                            float size = Math.max(width, height);
+                            float distance = 1.0f - size;  // Closer = larger box
+                            
+                            // Store results
+                            enemyPositions.put(i, new float[] {centerX, centerY, distance});
+                            enemyDistances.put(i, distance);
+                        }
+                    }
+                }
+                
+                Log.d(TAG, "Enemy detection model found " + enemyCount + " enemies");
+            } catch (Exception e) {
+                Log.e(TAG, "Error running enemy detection model: " + e.getMessage());
+            }
+        }
+        
+        // Second attempt: use color-based detection
+        if (enemyCount == 0) {
+            detectEnemiesByColor(image, currentState, enemyPositions, enemyDistances);
+            enemyCount = enemyPositions.size();
+            enemiesDetected = enemyCount > 0;
+        }
+        
+        // Store results
+        lastResults.put("enemies_detected", enemiesDetected);
+        lastResults.put("enemy_count", enemyCount);
+        lastResults.put("enemy_positions", enemyPositions);
+        lastResults.put("enemy_distances", enemyDistances);
+    }
+    
+    /**
+     * Detect enemies by color (red indicators in most games)
+     */
+    private void detectEnemiesByColor(Bitmap image, GameState currentState, 
+            Map<Integer, float[]> enemyPositions, Map<Integer, Float> enemyDistances) {
+        
+        // Get enemy colors for this game
+        int[] colors = enemyColors.getOrDefault(gameType, enemyColors.get(AIController.GameType.OTHER));
+        
+        // Limits for acceptable color matches
+        final int COLOR_THRESHOLD = 30;  // RGB max difference
+        final int MIN_CLUSTER_SIZE = 20;  // Minimum pixels to count as enemy
+        
+        // Scale down image for faster processing
+        int processWidth = image.getWidth() / 4;
+        int processHeight = image.getHeight() / 4;
+        Bitmap scaledImage = Bitmap.createScaledBitmap(image, processWidth, processHeight, true);
+        
+        // Keep track of enemy pixel clusters
+        List<PointF> clusterCenters = new ArrayList<>();
+        List<Integer> clusterSizes = new ArrayList<>();
+        
+        // Scan image for enemy colors
+        boolean[][] checkedPixels = new boolean[processWidth][processHeight];
+        
+        for (int y = 0; y < processHeight; y++) {
+            for (int x = 0; x < processWidth; x++) {
+                if (checkedPixels[x][y]) continue;
+                
+                int pixel = scaledImage.getPixel(x, y);
+                if (isEnemyColor(pixel, colors, COLOR_THRESHOLD)) {
+                    // Found enemy color, flood fill to get cluster
+                    List<PointF> cluster = floodFill(scaledImage, checkedPixels, x, y, colors, COLOR_THRESHOLD);
+                    
+                    if (cluster.size() >= MIN_CLUSTER_SIZE) {
+                        // Calculate cluster center
+                        float sumX = 0;
+                        float sumY = 0;
+                        for (PointF point : cluster) {
+                            sumX += point.x;
+                            sumY += point.y;
+                        }
+                        
+                        PointF center = new PointF(sumX / cluster.size(), sumY / cluster.size());
+                        clusterCenters.add(center);
+                        clusterSizes.add(cluster.size());
+                    }
+                } else {
+                    checkedPixels[x][y] = true;
+                }
+            }
+        }
+        
+        Log.d(TAG, "Color detection found " + clusterCenters.size() + " potential enemies");
+        
+        // Convert cluster centers to enemy positions
+        for (int i = 0; i < clusterCenters.size(); i++) {
+            PointF center = clusterCenters.get(i);
+            int clusterSize = clusterSizes.get(i);
+            
+            // Convert to normalized coordinates (0-1)
+            float normalizedX = center.x / processWidth;
+            float normalizedY = center.y / processHeight;
+            
+            // Estimate distance based on cluster size
+            float normalizedSize = Math.min(1.0f, clusterSize / 500.0f);
+            float distance = 1.0f - normalizedSize;  // Closer = larger cluster
+            
+            // Store results
+            enemyPositions.put(i, new float[] {normalizedX, normalizedY, distance});
+            enemyDistances.put(i, distance);
+        }
+    }
+    
+    /**
+     * Check if a pixel is an enemy color
+     */
+    private boolean isEnemyColor(int pixel, int[] enemyColors, int threshold) {
+        int r = Color.red(pixel);
+        int g = Color.green(pixel);
+        int b = Color.blue(pixel);
+        
+        for (int enemyColor : enemyColors) {
+            int enemyR = Color.red(enemyColor);
+            int enemyG = Color.green(enemyColor);
+            int enemyB = Color.blue(enemyColor);
+            
+            // Calculate color distance
+            int deltaR = Math.abs(r - enemyR);
+            int deltaG = Math.abs(g - enemyG);
+            int deltaB = Math.abs(b - enemyB);
+            
+            if (deltaR <= threshold && deltaG <= threshold && deltaB <= threshold) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Flood fill to find connected pixels of similar color
+     */
+    private List<PointF> floodFill(Bitmap image, boolean[][] checkedPixels, 
+            int startX, int startY, int[] enemyColors, int threshold) {
+        
+        List<PointF> cluster = new ArrayList<>();
+        int width = image.getWidth();
+        int height = image.getHeight();
+        
+        // Use a stack to avoid recursion
+        List<PointF> stack = new ArrayList<>();
+        stack.add(new PointF(startX, startY));
+        
+        while (!stack.isEmpty()) {
+            PointF point = stack.remove(stack.size() - 1);
+            int x = (int) point.x;
+            int y = (int) point.y;
+            
+            if (x < 0 || x >= width || y < 0 || y >= height || checkedPixels[x][y]) {
+                continue;
+            }
+            
+            int pixel = image.getPixel(x, y);
+            if (isEnemyColor(pixel, enemyColors, threshold)) {
+                cluster.add(new PointF(x, y));
+                checkedPixels[x][y] = true;
+                
+                // Add neighbors to stack
+                stack.add(new PointF(x + 1, y));
+                stack.add(new PointF(x - 1, y));
+                stack.add(new PointF(x, y + 1));
+                stack.add(new PointF(x, y - 1));
+            } else {
+                checkedPixels[x][y] = true;
+            }
+        }
+        
+        return cluster;
+    }
+    
+    /**
+     * Detect HUD elements (ammo counter, mini-map, etc.) in FPS games
+     */
+    private void detectHudElements(Bitmap image, GameState currentState) {
+        Map<String, Object> gameSpecific = new HashMap<>();
+        
+        // Check for ammo counter (usually bottom right)
+        int ammoValue = detectAmmoCounter(image);
+        if (ammoValue > 0) {
+            gameSpecific.put("ammo_current", ammoValue);
+        }
+        
+        // Check for minimap (usually top corner)
+        boolean hasMap = detectMinimap(image);
+        gameSpecific.put("has_minimap", hasMap);
+        
+        // Store all results
+        lastResults.put("game_specific", gameSpecific);
+    }
+    
+    /**
+     * Detect ammo counter in image
+     */
+    private int detectAmmoCounter(Bitmap image) {
+        // Use OCR through ElementDetector if available
+        if (elementDetector != null) {
+            int width = image.getWidth();
+            int height = image.getHeight();
+            
+            // Check bottom right corner for ammo counter
+            Rect ammoRegion = new Rect(width * 3 / 4, height * 3 / 4, width, height);
+            String ammoText = elementDetector.extractTextFromRegion(image, ammoRegion);
+            
+            if (ammoText != null && !ammoText.isEmpty()) {
+                // Look for patterns like "30/120"
+                if (ammoText.matches(".*\\d+\\s*/\\s*\\d+.*")) {
+                    try {
+                        String[] parts = ammoText.split("/");
+                        if (parts.length >= 1) {
+                            String ammoStr = parts[0].replaceAll("[^0-9]", "");
+                            return Integer.parseInt(ammoStr);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error parsing ammo counter: " + e.getMessage());
+                    }
+                }
+                
+                // Just find any number if pattern doesn't match
+                else {
+                    try {
+                        // Extract first number from text
+                        String ammoStr = ammoText.replaceAll("[^0-9]", "");
+                        if (!ammoStr.isEmpty()) {
+                            return Integer.parseInt(ammoStr);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error parsing ammo counter: " + e.getMessage());
+                    }
+                }
+            }
+        }
+        
+        return -1;
+    }
+    
+    /**
+     * Detect minimap in image
+     */
+    private boolean detectMinimap(Bitmap image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        
+        // Most games have minimap in one of the corners
+        // Try each corner and look for distinct color patterns
+        
+        // Top-left corner
+        if (isMinimapRegion(image, 0, 0, width / 4, height / 4)) {
+            return true;
+        }
+        
+        // Top-right corner
+        if (isMinimapRegion(image, width * 3 / 4, 0, width, height / 4)) {
+            return true;
+        }
+        
+        // Bottom-left corner
+        if (isMinimapRegion(image, 0, height * 3 / 4, width / 4, height)) {
+            return true;
+        }
+        
+        // Bottom-right corner
+        if (isMinimapRegion(image, width * 3 / 4, height * 3 / 4, width, height)) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if a region looks like a minimap
+     */
+    private boolean isMinimapRegion(Bitmap image, int left, int top, int right, int bottom) {
+        // Calculate average and variance of colors in region
+        int width = right - left;
+        int height = bottom - top;
+        
+        int sampleSize = 50;  // Sample this many points to save time
+        int[] colors = new int[sampleSize];
+        
+        // Sample random points in region
+        for (int i = 0; i < sampleSize; i++) {
+            int x = left + (int) (Math.random() * width);
+            int y = top + (int) (Math.random() * height);
+            colors[i] = image.getPixel(x, y);
+        }
+        
+        // Calculate color variance
+        double variance = calculateColorVariance(colors);
+        
+        // Minimaps have moderate to high color variance
+        return variance > 500 && variance < 5000;
+    }
+    
+    /**
+     * Calculate variance of colors
+     */
+    private double calculateColorVariance(int[] colors) {
+        if (colors.length == 0) return 0;
+        
+        // Calculate average RGB
+        int totalR = 0;
+        int totalG = 0;
+        int totalB = 0;
+        
+        for (int color : colors) {
+            totalR += Color.red(color);
+            totalG += Color.green(color);
+            totalB += Color.blue(color);
+        }
+        
+        double avgR = totalR / (double) colors.length;
+        double avgG = totalG / (double) colors.length;
+        double avgB = totalB / (double) colors.length;
+        
+        // Calculate variance
+        double sumSquaredDiffR = 0;
+        double sumSquaredDiffG = 0;
+        double sumSquaredDiffB = 0;
+        
+        for (int color : colors) {
+            double diffR = Color.red(color) - avgR;
+            double diffG = Color.green(color) - avgG;
+            double diffB = Color.blue(color) - avgB;
+            
+            sumSquaredDiffR += diffR * diffR;
+            sumSquaredDiffG += diffG * diffG;
+            sumSquaredDiffB += diffB * diffB;
+        }
+        
+        double varianceR = sumSquaredDiffR / colors.length;
+        double varianceG = sumSquaredDiffG / colors.length;
+        double varianceB = sumSquaredDiffB / colors.length;
+        
+        // Use maximum variance as indicator
+        return Math.max(Math.max(varianceR, varianceG), varianceB);
+    }
+    
+    /**
+     * Detect resources in strategy games
+     */
+    private void detectResources(Bitmap image, GameState currentState) {
+        Map<String, Object> gameSpecific = new HashMap<>();
+        
+        // Use OCR through ElementDetector if available
+        if (elementDetector != null) {
+            int width = image.getWidth();
+            int height = image.getHeight();
+            
+            // Resource counters usually at top of screen
+            Rect resourceRegion = new Rect(0, 0, width, height / 4);
+            String resourceText = elementDetector.extractTextFromRegion(image, resourceRegion);
+            
+            if (resourceText != null && !resourceText.isEmpty()) {
+                // Look for resource patterns
+                String[] resourceTypes = {"Gold", "Elixir", "Gems", "Stone", "Wood", "Food", "Iron", "Coins"};
+                
+                for (String resourceType : resourceTypes) {
+                    if (resourceText.contains(resourceType)) {
+                        // Try to extract value
+                        try {
+                            int startIndex = resourceText.indexOf(resourceType) + resourceType.length();
+                            String remaining = resourceText.substring(startIndex);
+                            
+                            // Look for numbers after resource name
+                            String resourceValue = remaining.replaceAll("[^0-9,.]", "");
+                            if (!resourceValue.isEmpty()) {
+                                // Remove commas
+                                resourceValue = resourceValue.replace(",", "");
+                                
+                                gameSpecific.put(resourceType.toLowerCase() + "_value", Integer.parseInt(resourceValue));
+                            }
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error parsing resource value: " + e.getMessage());
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Store all results
+        lastResults.put("game_specific", gameSpecific);
+    }
+    
+    /**
+     * Detect units in strategy games
+     */
+    private void detectUnits(Bitmap image, GameState currentState) {
+        // Use object detection model if available
+        if (objectDetectionModel != null) {
+            try {
+                // Perform detection similar to enemy detection
+                // But look for different classes (units, buildings)
+                
+                // For now just update unit count in game-specific state
+                Map<String, Object> gameSpecific = (Map<String, Object>) lastResults.getOrDefault(
+                        "game_specific", new HashMap<String, Object>());
+                
+                // Placeholder count based on color clusters
+                int unitCount = countUnitsByColor(image);
+                gameSpecific.put("unit_count", unitCount);
+                
+                // Store all results
+                lastResults.put("game_specific", gameSpecific);
+            } catch (Exception e) {
+                Log.e(TAG, "Error detecting units: " + e.getMessage());
+            }
+        } else {
+            // Fallback to basic unit counting
+            Map<String, Object> gameSpecific = (Map<String, Object>) lastResults.getOrDefault(
+                    "game_specific", new HashMap<String, Object>());
+            
+            int unitCount = countUnitsByColor(image);
+            gameSpecific.put("unit_count", unitCount);
+            
+            // Store all results
+            lastResults.put("game_specific", gameSpecific);
+        }
+    }
+    
+    /**
+     * Count units by looking for color clusters
+     */
+    private int countUnitsByColor(Bitmap image) {
+        // Scale down image for faster processing
+        int processWidth = image.getWidth() / 8;
+        int processHeight = image.getHeight() / 8;
+        Bitmap scaledImage = Bitmap.createScaledBitmap(image, processWidth, processHeight, true);
+        
+        // Count distinct color clusters (potential units)
+        int clusterCount = 0;
+        boolean[][] checked = new boolean[processWidth][processHeight];
+        
+        for (int y = 0; y < processHeight; y++) {
+            for (int x = 0; x < processWidth; x++) {
+                if (!checked[x][y]) {
+                    // Find connected pixels of similar color
+                    int pixel = scaledImage.getPixel(x, y);
+                    int clusterSize = countSimilarColorCluster(scaledImage, checked, x, y, pixel);
+                    
+                    // If cluster is reasonable size, count as potential unit
+                    if (clusterSize >= 5 && clusterSize <= 100) {
+                        clusterCount++;
+                    }
+                }
+            }
+        }
+        
+        return clusterCount;
+    }
+    
+    /**
+     * Count connected pixels of similar color
+     */
+    private int countSimilarColorCluster(Bitmap image, boolean[][] checked, 
+            int startX, int startY, int referenceColor) {
+        
+        final int COLOR_THRESHOLD = 30;  // RGB max difference
+        int count = 0;
+        int width = image.getWidth();
+        int height = image.getHeight();
+        
+        // Use a stack to avoid recursion
+        List<PointF> stack = new ArrayList<>();
+        stack.add(new PointF(startX, startY));
+        
+        while (!stack.isEmpty()) {
+            PointF point = stack.remove(stack.size() - 1);
+            int x = (int) point.x;
+            int y = (int) point.y;
+            
+            if (x < 0 || x >= width || y < 0 || y >= height || checked[x][y]) {
+                continue;
+            }
+            
+            int pixel = image.getPixel(x, y);
+            if (isSimilarColor(pixel, referenceColor, COLOR_THRESHOLD)) {
+                count++;
+                checked[x][y] = true;
+                
+                // Add neighbors to stack
+                stack.add(new PointF(x + 1, y));
+                stack.add(new PointF(x - 1, y));
+                stack.add(new PointF(x, y + 1));
+                stack.add(new PointF(x, y - 1));
+            } else {
+                checked[x][y] = true;
+            }
+        }
+        
+        return count;
+    }
+    
+    /**
+     * Check if two colors are similar
+     */
+    private boolean isSimilarColor(int color1, int color2, int threshold) {
+        int r1 = Color.red(color1);
+        int g1 = Color.green(color1);
+        int b1 = Color.blue(color1);
+        
+        int r2 = Color.red(color2);
+        int g2 = Color.green(color2);
+        int b2 = Color.blue(color2);
+        
+        int deltaR = Math.abs(r1 - r2);
+        int deltaG = Math.abs(g1 - g2);
+        int deltaB = Math.abs(b1 - b2);
+        
+        return deltaR <= threshold && deltaG <= threshold && deltaB <= threshold;
+    }
+    
+    /**
+     * Detect abilities in MOBA games
+     */
+    private void detectAbilities(Bitmap image, GameState currentState) {
+        Map<String, Object> gameSpecific = new HashMap<>();
+        
+        // Abilities usually at bottom of screen
+        int width = image.getWidth();
+        int height = image.getHeight();
+        Rect abilityRegion = new Rect(width / 4, height * 3 / 4, width * 3 / 4, height);
+        
+        // Check for ability cooldowns
+        detectCooldowns(image, abilityRegion, gameSpecific);
+        
+        // Store all results
+        lastResults.put("game_specific", gameSpecific);
+    }
+    
+    /**
+     * Detect ability cooldowns from image region
+     */
+    private void detectCooldowns(Bitmap image, Rect region, Map<String, Object> gameSpecific) {
+        // Use OCR through ElementDetector if available
+        if (elementDetector != null) {
+            String cooldownText = elementDetector.extractTextFromRegion(image, region);
+            
+            if (cooldownText != null && !cooldownText.isEmpty()) {
+                // Look for cooldown patterns like "5s" or "CD: 10.5"
+                if (cooldownText.matches(".*\\d+\\.?\\d*s.*") || 
+                    cooldownText.matches(".*CD\\s*:\\s*\\d+\\.?\\d*.*")) {
+                    
+                    try {
+                        // Extract number from cooldown text
+                        String numStr = cooldownText.replaceAll("[^0-9.]", "");
+                        if (!numStr.isEmpty()) {
+                            float cooldown = Float.parseFloat(numStr);
+                            gameSpecific.put("ability_cooldown", cooldown);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error parsing cooldown: " + e.getMessage());
+                    }
+                }
+            }
+        }
+        
+        // Check for circular cooldown indicators (common in MOBAs)
+        detectCircularCooldowns(image, region, gameSpecific);
+    }
+    
+    /**
+     * Detect circular cooldown indicators
+     */
+    private void detectCircularCooldowns(Bitmap image, Rect region, Map<String, Object> gameSpecific) {
+        // Extract subimage for the region
+        Bitmap regionImage = Bitmap.createBitmap(image, 
+                region.left, region.top, region.width(), region.height());
+        
+        // Look for semi-transparent dark overlays on round buttons
+        // (common way to show cooldowns in MOBAs)
+        List<Float> cooldownPercentages = new ArrayList<>();
+        
+        int width = regionImage.getWidth();
+        int height = regionImage.getHeight();
+        
+        // Try to find circular buttons first
+        List<Rect> buttonRects = findCircularButtons(regionImage);
+        
+        for (Rect buttonRect : buttonRects) {
+            // Check for cooldown overlay (dark semi-transparent area)
+            float cooldownPct = detectCooldownOverlay(regionImage, buttonRect);
+            if (cooldownPct > 0) {
+                cooldownPercentages.add(cooldownPct);
+            }
+        }
+        
+        // Add overall results
+        if (!cooldownPercentages.isEmpty()) {
+            // Sort by cooldown percentage (smallest = most ready)
+            cooldownPercentages.sort(Comparator.naturalOrder());
+            
+            // Store the smallest non-zero cooldown
+            float nearestReady = cooldownPercentages.get(0);
+            gameSpecific.put("nearest_ability_ready_pct", 1.0f - nearestReady);
+            
+            // Check if any ability is ready
+            boolean abilityReady = nearestReady < 0.1f;  // 10% or less cooldown remaining
+            gameSpecific.put("ability_ready", abilityReady);
+            
+            // Store all cooldowns
+            gameSpecific.put("ability_cooldowns", cooldownPercentages);
+        }
+    }
+    
+    /**
+     * Find circular buttons in image
+     */
+    private List<Rect> findCircularButtons(Bitmap image) {
+        List<Rect> buttons = new ArrayList<>();
+        int width = image.getWidth();
+        int height = image.getHeight();
+        
+        // For simplicity, just look for evenly spaced buttons
+        // at the bottom of the screen (common in MOBAs)
+        
+        // Estimate button size
+        int buttonSize = Math.min(width, height) / 6;
+        
+        // Create several potential button positions
+        int buttonCount = 4;  // Most MOBAs have 3-4 abilities
+        int spacing = width / (buttonCount + 1);
+        
+        for (int i = 1; i <= buttonCount; i++) {
+            int centerX = i * spacing;
+            int centerY = height / 2;
+            
+            Rect buttonRect = new Rect(
+                    centerX - buttonSize / 2,
+                    centerY - buttonSize / 2,
+                    centerX + buttonSize / 2,
+                    centerY + buttonSize / 2);
+            
+            // Make sure rect is within image
+            buttonRect.left = Math.max(0, buttonRect.left);
+            buttonRect.top = Math.max(0, buttonRect.top);
+            buttonRect.right = Math.min(width, buttonRect.right);
+            buttonRect.bottom = Math.min(height, buttonRect.bottom);
+            
+            buttons.add(buttonRect);
+        }
+        
+        return buttons;
+    }
+    
+    /**
+     * Detect cooldown overlay on button
+     */
+    private float detectCooldownOverlay(Bitmap image, Rect buttonRect) {
+        int width = buttonRect.width();
+        int height = buttonRect.height();
+        
+        // Count dark semi-transparent pixels
+        int darkCount = 0;
+        int totalCount = 0;
+        
+        for (int y = buttonRect.top; y < buttonRect.bottom; y++) {
+            for (int x = buttonRect.left; x < buttonRect.right; x++) {
+                // Check if point is within image bounds
+                if (x >= 0 && x < image.getWidth() && y >= 0 && y < image.getHeight()) {
+                    int pixel = image.getPixel(x, y);
+                    
+                    // Check if pixel is within circle (approximate)
+                    int centerX = buttonRect.left + width / 2;
+                    int centerY = buttonRect.top + height / 2;
+                    int radius = Math.min(width, height) / 2;
+                    
+                    int dx = x - centerX;
+                    int dy = y - centerY;
+                    int distSq = dx * dx + dy * dy;
+                    
+                    if (distSq <= radius * radius) {
+                        totalCount++;
+                        
+                        // Dark overlay pixels are typically dark with some transparency
+                        int r = Color.red(pixel);
+                        int g = Color.green(pixel);
+                        int b = Color.blue(pixel);
+                        int brightness = (r + g + b) / 3;
+                        
+                        if (brightness < 80) {  // Dark pixel
+                            darkCount++;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Calculate percentage of dark pixels
+        return totalCount > 0 ? (float) darkCount / totalCount : 0;
+    }
+    
+    /**
+     * Detect champions/heroes in MOBA games
+     */
+    private void detectChampions(Bitmap image, GameState currentState) {
+        // Use object detection or color-based detection similar to enemy detection
+        Map<Integer, float[]> allyPositions = new HashMap<>();
+        Map<Integer, float[]> enemyPositions = new HashMap<>();
+        
+        // For now, just do simplified color-based detection
+        detectCharactersByColor(image, allyPositions, enemyPositions);
+        
+        // Store results
+        Map<String, Object> gameSpecific = (Map<String, Object>) lastResults.getOrDefault(
+                "game_specific", new HashMap<String, Object>());
+        
+        gameSpecific.put("ally_count", allyPositions.size());
+        gameSpecific.put("ally_positions", allyPositions);
+        gameSpecific.put("enemy_count", enemyPositions.size());
+        gameSpecific.put("enemy_positions", enemyPositions);
+        
+        // Update enemy detection results
+        lastResults.put("enemies_detected", !enemyPositions.isEmpty());
+        lastResults.put("enemy_count", enemyPositions.size());
+        lastResults.put("enemy_positions", enemyPositions);
+        
+        // Store all results
+        lastResults.put("game_specific", gameSpecific);
+    }
+    
+    /**
+     * Detect characters by color bars (health bars)
+     */
+    private void detectCharactersByColor(Bitmap image, 
+            Map<Integer, float[]> allyPositions, Map<Integer, float[]> enemyPositions) {
+        // In MOBAs, allies usually have green/blue health bars, enemies have red
+        int[] allyColors = {
+            Color.rgb(0, 255, 0),     // Green
+            Color.rgb(50, 255, 50),   // Light green
+            Color.rgb(0, 200, 0),     // Dark green
+            Color.rgb(0, 0, 255),     // Blue
+            Color.rgb(50, 50, 255),   // Light blue
+            Color.rgb(0, 0, 200)      // Dark blue
+        };
+        
+        // Get enemy colors for current game type or use default OTHER type
+        int[] gameEnemyColors;
+        try {
+            // Handle the type checking and retrieval in a safer way
+            if (gameType != null && enemyColors.containsKey(gameType)) {
+                gameEnemyColors = enemyColors.get(gameType);
+            } else {
+                // Default to OTHER type if current gameType is not found
+                gameEnemyColors = enemyColors.get(AIController.GameType.OTHER);
+            }
+            
+            // Fallback with hard-coded red colors if we encounter any issue
+            if (gameEnemyColors == null) {
+                gameEnemyColors = new int[] {
+                    Color.rgb(255, 0, 0),      // Red
+                    Color.rgb(255, 50, 50),    // Light red
+                    Color.rgb(200, 0, 0)       // Dark red
+                };
+            }
+        } catch (Exception e) {
+            // Provide default colors if any exception occurs
+            Log.e(TAG, "Error getting enemy colors: " + e.getMessage());
+            gameEnemyColors = new int[] {
+                Color.rgb(255, 0, 0),      // Red
+                Color.rgb(255, 50, 50),    // Light red
+                Color.rgb(200, 0, 0)       // Dark red
+            };
+        }
+        
+        // Scale down image for faster processing
+        int processWidth = image.getWidth() / 4;
+        int processHeight = image.getHeight() / 4;
+        Bitmap scaledImage = Bitmap.createScaledBitmap(image, processWidth, processHeight, true);
+        
+        // Scan image for ally colors
+        detectColorBarClusters(scaledImage, allyColors, 30, 10, allyPositions);
+        
+        // Scan image for enemy colors
+        detectColorBarClusters(scaledImage, gameEnemyColors, 30, 10, enemyPositions);
+    }
+    
+    /**
+     * Detect color bar clusters (health bars)
+     */
+    private void detectColorBarClusters(Bitmap image, int[] targetColors, int colorThreshold, 
+            int minClusterSize, Map<Integer, float[]> positions) {
+        
+        int width = image.getWidth();
+        int height = image.getHeight();
+        
+        // Look for horizontal bars of similar color
+        boolean[][] checkedPixels = new boolean[width][height];
+        
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (checkedPixels[x][y]) continue;
+                
+                int pixel = image.getPixel(x, y);
+                if (isMatchingColor(pixel, targetColors, colorThreshold)) {
+                    // Check for horizontal sequence
+                    int barLength = 0;
+                    for (int i = 0; i < 20 && x + i < width; i++) {
+                        if (x + i >= width) break;
+                        
+                        int nextPixel = image.getPixel(x + i, y);
+                        if (isMatchingColor(nextPixel, targetColors, colorThreshold)) {
+                            barLength++;
+                            checkedPixels[x + i][y] = true;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // If long enough, might be a health bar
+                    if (barLength >= minClusterSize) {
+                        // Calculate center
+                        float centerX = x + barLength / 2.0f;
+                        float centerY = y;
+                        
+                        // Convert to normalized coordinates (0-1)
+                        float normalizedX = centerX / width;
+                        float normalizedY = centerY / height;
+                        
+                        // Estimate distance based on bar size (shorter = further)
+                        float normalizedSize = Math.min(1.0f, barLength / 50.0f);
+                        float distance = 1.0f - normalizedSize;
+                        
+                        // Add to positions map
+                        int id = positions.size();
+                        positions.put(id, new float[] {normalizedX, normalizedY, distance});
+                    }
+                } else {
+                    checkedPixels[x][y] = true;
+                }
+            }
+        }
+    }
+    
+    /**
+     * Check if a color matches any target color
+     */
+    private boolean isMatchingColor(int color, int[] targetColors, int threshold) {
+        int r = Color.red(color);
+        int g = Color.green(color);
+        int b = Color.blue(color);
+        
+        for (int targetColor : targetColors) {
+            int targetR = Color.red(targetColor);
+            int targetG = Color.green(targetColor);
+            int targetB = Color.blue(targetColor);
+            
+            int deltaR = Math.abs(r - targetR);
+            int deltaG = Math.abs(g - targetG);
+            int deltaB = Math.abs(b - targetB);
+            
+            if (deltaR <= threshold && deltaG <= threshold && deltaB <= threshold) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Detect inventory in RPG games
+     */
+    private void detectInventory(Bitmap image, GameState currentState) {
+        // Use element detector if available
+        if (elementDetector != null) {
+            Map<String, Object> gameSpecific = (Map<String, Object>) lastResults.getOrDefault(
+                    "game_specific", new HashMap<String, Object>());
+            
+            int width = image.getWidth();
+            int height = image.getHeight();
+            
+            // Check for inventory indicators
+            String inventoryText = elementDetector.extractTextFromRegion(image, 
+                    new Rect(0, 0, width, height));
+            
+            boolean inventoryOpen = inventoryText != null && 
+                    (inventoryText.contains("Inventory") || inventoryText.contains("Items"));
+            
+            gameSpecific.put("inventory_open", inventoryOpen);
+            
+            // Store all results
+            lastResults.put("game_specific", gameSpecific);
+        }
+    }
+    
+    /**
+     * Detect quest markers in RPG games
+     */
+    private void detectQuestMarkers(Bitmap image, GameState currentState) {
+        // Use element detector if available
+        if (elementDetector != null) {
+            Map<String, Object> gameSpecific = (Map<String, Object>) lastResults.getOrDefault(
+                    "game_specific", new HashMap<String, Object>());
+            
+            int width = image.getWidth();
+            int height = image.getHeight();
+            
+            // Check for quest indicators
+            String questText = elementDetector.extractTextFromRegion(image, 
+                    new Rect(0, 0, width, height));
+            
+            if (questText != null && (questText.contains("Quest") || questText.contains("Mission"))) {
+                // Try to extract quest progress
+                if (questText.matches(".*\\d+\\s*/\\s*\\d+.*")) {
+                    try {
+                        String[] parts = questText.split("/");
+                        if (parts.length >= 2) {
+                            int current = Integer.parseInt(parts[0].replaceAll("[^0-9]", ""));
+                            int total = Integer.parseInt(parts[1].replaceAll("[^0-9]", ""));
+                            
+                            gameSpecific.put("quest_progress", current);
+                            gameSpecific.put("quest_total", total);
+                            gameSpecific.put("quest_pct", (float) current / total);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error parsing quest progress: " + e.getMessage());
+                    }
+                }
+            }
+            
+            // Store all results
+            lastResults.put("game_specific", gameSpecific);
+        }
+    }
+    
+    /**
+     * Detect characters in RPG games
+     */
+    private void detectCharacters(Bitmap image, GameState currentState) {
+        // Similar to enemy detection in other games
+        Map<Integer, float[]> characterPositions = new HashMap<>();
+        
+        // For now use basic detection
+        int width = image.getWidth();
+        int height = image.getHeight();
+        
+        // Look for distinct moving objects
+        if (objectDetectionModel != null) {
+            // Use model to detect characters
+            // (implementation would be similar to enemy detection)
+        } else {
+            // For now just report dummy data
+            Map<String, Object> gameSpecific = (Map<String, Object>) lastResults.getOrDefault(
+                    "game_specific", new HashMap<String, Object>());
+            
+            gameSpecific.put("character_count", 1);
+            
+            // Store all results
+            lastResults.put("game_specific", gameSpecific);
+        }
+    }
+    
+    /**
+     * Detect basic elements for any game type
+     */
+    private void detectBasicElements(Bitmap image, GameState currentState) {
+        // Perform generic detections like:
+        // - Text extraction
+        // - Button detection
+        // - Color blob detection
+        
+        Map<String, Object> gameSpecific = (Map<String, Object>) lastResults.getOrDefault(
+                "game_specific", new HashMap<String, Object>());
+        
+        // For now just count buttons and detect health bars
+        if (elementDetector != null) {
+            int buttonCount = elementDetector.countButtons(image);
+            gameSpecific.put("button_count", buttonCount);
+        }
+        
+        // Store all results
+        lastResults.put("game_specific", gameSpecific);
+    }
+    
+    /**
+     * Detect health bars across all game types
+     */
+    private void detectHealthBars(Bitmap image, GameState currentState) {
+        float healthPct = detectHealthBarLevel(image);
+        
+        if (healthPct >= 0) {
+            lastResults.put("health_pct", healthPct);
+        }
+    }
+    
+    /**
+     * Detect health bar level
+     */
+    private float detectHealthBarLevel(Bitmap image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        
+        // Look for health bar in common locations
+        Rect[] healthBarRegions = {
+            new Rect(0, 0, width / 3, height / 5),             // Top left
+            new Rect(width / 3, 0, width * 2 / 3, height / 5), // Top center
+            new Rect(width * 2 / 3, 0, width, height / 5),     // Top right
+            new Rect(0, 0, width, height / 10)                 // Very top
+        };
+        
+        // Colors typically used for health bars
+        int[] healthColors = {
+            Color.rgb(255, 0, 0),     // Red
+            Color.rgb(0, 255, 0),     // Green
+            Color.rgb(0, 200, 0)      // Dark green
+        };
+        
+        float bestHealthPct = -1;
+        
+        for (Rect region : healthBarRegions) {
+            float healthPct = detectHealthBarInRegion(image, region, healthColors);
+            if (healthPct >= 0) {
+                if (bestHealthPct < 0 || healthPct < bestHealthPct) {
+                    bestHealthPct = healthPct;
+                }
+            }
+        }
+        
+        return bestHealthPct;
+    }
+    
+    /**
+     * Detect health bar in specific region
+     */
+    private float detectHealthBarInRegion(Bitmap image, Rect region, int[] healthColors) {
+        // Extract subimage
+        Bitmap regionImage = Bitmap.createBitmap(image, 
+                region.left, region.top, region.width(), region.height());
+        
+        int width = regionImage.getWidth();
+        int height = regionImage.getHeight();
+        
+        // Look for horizontal health bar (most common)
+        List<Rect> possibleBars = new ArrayList<>();
+        
+        // Scan rows looking for horizontal strips of health color
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (isHealthColor(regionImage.getPixel(x, y), healthColors)) {
+                    // Found potential start of health bar
+                    int barStart = x;
+                    int barEnd = x;
+                    
+                    // Find end of horizontal strip
+                    while (barEnd < width && isHealthColor(regionImage.getPixel(barEnd, y), healthColors)) {
+                        barEnd++;
+                    }
+                    
+                    int barLength = barEnd - barStart;
+                    
+                    // If long enough, could be a health bar
+                    if (barLength >= Math.min(20, width / 10) && barLength <= width * 0.9f) {
+                        // Check if it has consistent height
+                        int barHeight = 1;
+                        int checkY = y + 1;
+                        
+                        while (checkY < height) {
+                            // Check if this row has similar color pattern
+                            boolean rowMatch = true;
+                            for (int checkX = barStart; checkX < barEnd; checkX++) {
+                                if (checkX >= width) {
+                                    rowMatch = false;
+                                    break;
+                                }
+                                
+                                if (!isHealthColor(regionImage.getPixel(checkX, checkY), healthColors)) {
+                                    rowMatch = false;
+                                    break;
+                                }
+                            }
+                            
+                            if (rowMatch) {
+                                barHeight++;
+                                checkY++;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        // If height is reasonable, it's likely a health bar
+                        if (barHeight >= 3 && barHeight <= height / 5) {
+                            Rect barRect = new Rect(barStart, y, barEnd, y + barHeight);
+                            possibleBars.add(barRect);
+                            
+                            // Skip past this bar
+                            x = barEnd;
+                        }
+                    }
+                    
+                    // Skip past the processed pixels
+                    x = barEnd;
+                }
+            }
+        }
+        
+        // Find the largest potential health bar
+        Rect bestBar = null;
+        int maxArea = 0;
+        
+        for (Rect bar : possibleBars) {
+            int area = bar.width() * bar.height();
+            if (area > maxArea) {
+                maxArea = area;
+                bestBar = bar;
+            }
+        }
+        
+        if (bestBar != null) {
+            // Now look for outer bar boundary (background/container)
+            Rect container = findHealthBarContainer(regionImage, bestBar);
+            
+            if (container != null && container.width() > bestBar.width()) {
+                // Calculate health percentage
+                return (float) bestBar.width() / container.width();
+            } else {
+                // Estimate health percentage by looking for max width in vicinity
+                int maxWidth = estimateMaxHealthWidth(regionImage, bestBar);
+                if (maxWidth > bestBar.width()) {
+                    return (float) bestBar.width() / maxWidth;
+                }
+            }
+        }
+        
+        return -1;  // No health bar found
+    }
+    
+    /**
+     * Check if color is a health color
+     */
+    private boolean isHealthColor(int pixel, int[] healthColors) {
+        int r = Color.red(pixel);
+        int g = Color.green(pixel);
+        int b = Color.blue(pixel);
+        
+        final int THRESHOLD = 60;
+        
+        for (int healthColor : healthColors) {
+            int healthR = Color.red(healthColor);
+            int healthG = Color.green(healthColor);
+            int healthB = Color.blue(healthColor);
+            
+            int deltaR = Math.abs(r - healthR);
+            int deltaG = Math.abs(g - healthG);
+            int deltaB = Math.abs(b - healthB);
+            
+            if (deltaR <= THRESHOLD && deltaG <= THRESHOLD && deltaB <= THRESHOLD) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Find health bar container (background)
+     */
+    private Rect findHealthBarContainer(Bitmap image, Rect healthBar) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        
+        // Look for darker border/background near the health bar
+        int x1 = Math.max(0, healthBar.left - 5);
+        int x2 = Math.min(width - 1, healthBar.right + 5);
+        int y1 = Math.max(0, healthBar.top - 5);
+        int y2 = Math.min(height - 1, healthBar.bottom + 5);
+        
+        // Look for left edge of container
+        int containerLeft = healthBar.left;
+        for (int x = healthBar.left - 1; x >= x1; x--) {
+            boolean edgeFound = false;
+            
+            for (int y = healthBar.top; y < healthBar.bottom; y++) {
+                int pixel = image.getPixel(x, y);
+                
+                // Look for color change indicating edge
+                int nextPixel = image.getPixel(x + 1, y);
+                if (colorDifference(pixel, nextPixel) > 50) {
+                    edgeFound = true;
+                    break;
+                }
+            }
+            
+            if (edgeFound) {
+                containerLeft = x;
+                break;
+            }
+        }
+        
+        // Look for right edge of container
+        int containerRight = healthBar.right;
+        for (int x = healthBar.right; x <= x2; x++) {
+            boolean edgeFound = false;
+            
+            for (int y = healthBar.top; y < healthBar.bottom; y++) {
+                if (x - 1 >= 0 && x < width) {
+                    int pixel = image.getPixel(x, y);
+                    
+                    // Look for color change indicating edge
+                    int prevPixel = image.getPixel(x - 1, y);
+                    if (colorDifference(pixel, prevPixel) > 50) {
+                        edgeFound = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (edgeFound) {
+                containerRight = x;
+                break;
+            }
+        }
+        
+        return new Rect(containerLeft, healthBar.top, containerRight, healthBar.bottom);
+    }
+    
+    /**
+     * Estimate max health width when container isn't clear
+     */
+    private int estimateMaxHealthWidth(Bitmap image, Rect healthBar) {
+        // For simplicity, just assume a standard ratio based on screen size
+        return (int) (image.getWidth() * 0.3f);
+    }
+    
+    /**
+     * Calculate color difference between two pixels
+     */
+    private int colorDifference(int color1, int color2) {
+        int r1 = Color.red(color1);
+        int g1 = Color.green(color1);
+        int b1 = Color.blue(color1);
+        
+        int r2 = Color.red(color2);
+        int g2 = Color.green(color2);
+        int b2 = Color.blue(color2);
+        
+        int deltaR = Math.abs(r1 - r2);
+        int deltaG = Math.abs(g1 - g2);
+        int deltaB = Math.abs(b1 - b2);
+        
+        return (deltaR + deltaG + deltaB) / 3;
+    }
+    
+    /**
+     * Detect UI elements across all game types
+     */
+    private void detectUIElements(Bitmap image, GameState currentState) {
+        if (elementDetector != null) {
+            // Detect UI elements using element detector
+            Map<String, Object> uiElements = elementDetector.detectElements(image);
+            lastResults.put("ui_elements", uiElements);
+        }
+    }
+    
+    /**
+     * Detect game mode (in game, menu, etc.)
+     */
+    private void detectGameMode(Bitmap image, GameState currentState) {
+        // Try to determine if we're in a game or menu
+        boolean inGame = detectInGameState(image);
+        boolean inMenu = !inGame && detectMenuState(image);
+        boolean inLobby = !inGame && !inMenu && detectLobbyState(image);
+        
+        lastResults.put("in_game", inGame);
+        lastResults.put("in_menu", inMenu);
+        lastResults.put("in_lobby", inLobby);
+    }
+    
+    /**
+     * Detect if we're in an active game
+     */
+    private boolean detectInGameState(Bitmap image) {
+        // In most games, HUD elements indicate we're in game
+        
+        // Check if we found health bar
+        if (lastResults.containsKey("health_pct")) {
+            return true;
+        }
+        
+        // Check if we detected enemies
+        if (lastResults.containsKey("enemies_detected") && 
+                (boolean) lastResults.get("enemies_detected")) {
+            return true;
+        }
+        
+        // Check if we detected game-specific elements
+        if (lastResults.containsKey("game_specific")) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> gameSpecific = (Map<String, Object>) lastResults.get("game_specific");
+            
+            if ((gameSpecific.containsKey("has_minimap") && (boolean) gameSpecific.get("has_minimap")) ||
+                (gameSpecific.containsKey("ammo_current")) ||
+                (gameSpecific.containsKey("ability_cooldown")) ||
+                (gameSpecific.containsKey("unit_count") && (int) gameSpecific.get("unit_count") > 0)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Detect if we're in a menu
+     */
+    private boolean detectMenuState(Bitmap image) {
+        // Menus typically have lots of text and buttons
+        
+        if (elementDetector != null) {
+            int buttonCount = elementDetector.countButtons(image);
+            
+            // If there are many buttons but no in-game indicators, it's likely a menu
+            return buttonCount >= 5;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Detect if we're in a lobby
+     */
+    private boolean detectLobbyState(Bitmap image) {
+        // Lobbies often have specific text
+        
+        if (elementDetector != null) {
+            String text = elementDetector.extractTextFromImage(image);
+            
+            if (text != null && (text.contains("Lobby") || text.contains("Match") || 
+                    text.contains("Start") || text.contains("Ready"))) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Get the last analysis results
+     */
+    public Map<String, Object> getLastResults() {
+        return lastResults;
+    }
+    /**
+     * Manually update game state from analysis results
+     * This is a fallback for when updateFromScreenAnalysis() is not available
+     */
+    private void updateStateFromResults(GameState state) {
+        if (state == null || lastResults == null || lastResults.isEmpty()) {
+            return;
+        }
+        
+        // Extract key information from analysis results and manually update state
+        try {
+            // Update game objects if detected
+            if (lastResults.containsKey("enemy_positions")) {
+                @SuppressWarnings("unchecked")
+                Map<Integer, float[]> enemyPositions = 
+                    (Map<Integer, float[]>) lastResults.get("enemy_positions");
+                
+                if (enemyPositions != null && !enemyPositions.isEmpty()) {
+                    // Update enemy count through a public setter if available
+                    try {
+                        int enemyCount = enemyPositions.size();
+                        state.getClass().getMethod("setEnemyCount", int.class)
+                            .invoke(state, enemyCount);
+                    } catch (Exception e) {
+                        // Method not available, ignore
+                        Log.d(TAG, "setEnemyCount method not available: " + e.getMessage());
+                    }
+                }
+            }
+            
+            // Try to set screen type if available in analysis results
+            if (lastResults.containsKey("screen_type")) {
+                String screenType = (String) lastResults.get("screen_type");
+                try {
+                    // Try to set screen type using reflection 
+                    // (allows different GameScreenType enums to be used)
+                    Class<?> gameScreenTypeClass = Class.forName("com.aiassistant.models.GameScreenType");
+                    Method valueOf = gameScreenTypeClass.getMethod("valueOf", String.class);
+                    Object screenTypeEnum = valueOf.invoke(null, screenType);
+                    
+                    Method setScreenType = state.getClass().getMethod("setCurrentScreen", gameScreenTypeClass);
+                    setScreenType.invoke(state, screenTypeEnum);
+                } catch (Exception e) {
+                    // Method or enum value not available, ignore
+                    Log.d(TAG, "Could not set screen type: " + e.getMessage());
+                }
+            }
+            
+            // Set running state if available
+            if (lastResults.containsKey("game_running")) {
+                boolean gameRunning = (boolean) lastResults.get("game_running");
+                try {
+                    state.getClass().getMethod("setRunning", boolean.class)
+                        .invoke(state, gameRunning);
+                } catch (Exception e) {
+                    // Method not available, ignore
+                    Log.d(TAG, "setRunning method not available: " + e.getMessage());
+                }
+            }
+            
+            // Update score if available
+            if (lastResults.containsKey("score")) {
+                int score = (int) lastResults.get("score");
+                try {
+                    state.getClass().getMethod("setScore", int.class)
+                        .invoke(state, score);
+                } catch (Exception e) {
+                    // Method not available, ignore
+                    Log.d(TAG, "setScore method not available: " + e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in updateStateFromResults: " + e.getMessage());
+        }
+    }
+}

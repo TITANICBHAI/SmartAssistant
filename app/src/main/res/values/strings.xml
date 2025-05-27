@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SelfLearningAI</string>
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_ai">AI Control</string>
+    <string name="nav_learning">Learning</string>
+    <string name="nav_tasks">Tasks</string>
+    <string name="nav_task_scheduler">Task Scheduler</string>
+    <string name="nav_settings">Settings</string>
+    <string name="home_tab">Home</string>
+    <string name="ai_tab">AI Control</string>
+    <string name="learning_tab">Learning</string>
+    <string name="task_scheduler_tab">Task Scheduler</string>
+    <string name="settings_tab">Settings</string>
+    
+    <!-- Home Fragment -->
+    <string name="welcome_title">Welcome to SelfLearningAI</string>
+    <string name="welcome_message">Your adaptive assistant that learns from you</string>
+    <string name="status_active">AI Status: Active</string>
+    <string name="status_inactive">AI Status: Inactive</string>
+    <string name="quick_actions">Quick Actions</string>
+    <string name="stats_title">Learning Statistics</string>
+    <string name="action_activate">Activate</string>
+    <string name="action_deactivate">Deactivate</string>
+    
+    <!-- AI Fragment -->
+    <string name="ai_mode_header">Select AI Mode</string>
+    <string name="ai_mode_description">Choose how the AI will behave</string>
+    <string name="auto_ai">Auto AI</string>
+    <string name="copilot">Copilot</string>
+    <string name="passive">Passive</string>
+    <string name="auto_ai_description">Automatically takes control after a period of inactivity</string>
+    <string name="copilot_description">Suggests actions but waits for your confirmation</string>
+    <string name="passive_description">Only observes and learns, never takes action</string>
+    <string name="apply_mode">Apply Mode</string>
+    
+    <!-- Learning Fragment -->
+    <string name="learning_header">AI Learning</string>
+    <string name="learning_description">Manage how the AI learns from your behavior</string>
+    <string name="video_sources">Video Learning Sources</string>
+    <string name="add_source">Add Source</string>
+    <string name="learning_stats">Learning Statistics</string>
+    <string name="patterns_found">Patterns Found</string>
+    <string name="actions_learned">Actions Learned</string>
+    <string name="source_type">Source Type</string>
+    <string name="source_path">Source Path</string>
+    <string name="browse">Browse</string>
+    <string name="source_name">Source Name</string>
+    <string name="add">Add</string>
+    <string name="cancel">Cancel</string>
+    <string name="add_learning_source">Add Learning Source</string>
+    <string name="video_from_device">Video from Device</string>
+    <string name="youtube_video">YouTube Video</string>
+    <string name="app_behavior">App Behavior</string>
+    <string name="web_content">Web Content</string>
+    <string name="custom_content">Custom Content</string>
+    <string name="storage_permission_denied">Storage permission is required to select videos</string>
+    <string name="learning_source_added">Learning source added successfully</string>
+    <string name="learning_source_deleted">Learning source deleted</string>
+    <string name="start_learning">Start Learning</string>
+    <string name="pause_learning">Pause Learning</string>
+    <string name="edit_source">Edit Source</string>
+    <string name="delete_source">Delete Source</string>
+    <string name="delete_source_confirm">Are you sure you want to delete %1$s?</string>
+    <string name="delete">Delete</string>
+    
+    <!-- Task Scheduler Fragment -->
+    <string name="tasks_header">Task Scheduler</string>
+    <string name="tasks_description">Set up automated tasks for the AI to perform</string>
+    <string name="scheduled_tasks">Scheduled Tasks</string>
+    <string name="completed_tasks">Completed Tasks</string>
+    <string name="add_task">Add Task</string>
+    <string name="task_name">Task Name</string>
+    <string name="task_description">Task Description</string>
+    <string name="task_type">Task Type</string>
+    <string name="schedule_type">Schedule Type</string>
+    <string name="priority">Priority</string>
+    <string name="actions">Actions</string>
+    <string name="delete_task_title">Delete Task</string>
+    <string name="delete_task_message">Are you sure you want to delete this task?</string>
+    <string name="task_deleted">Task deleted successfully</string>
+    <string name="task_delete_error">Error deleting task</string>
+    <string name="task_already_running">Task is already running</string>
+    <string name="task_already_completed">Task is already completed</string>
+    <string name="task_execution_started">Task execution started</string>
+    <string name="task_execution_failed">Failed to execute task</string>
+    <string name="task_scheduled_success">Task scheduled successfully</string>
+    <string name="task_schedule_error">Error scheduling task</string>
+    <string name="task_updated_success">Task updated successfully</string>
+    
+    <!-- Settings Fragment -->
+    <string name="settings_header">AI Assistant Settings</string>
+    <string name="settings_title">Settings</string>
+    <string name="general_settings">General Settings</string>
+    <string name="accessibility_settings">Accessibility Settings</string>
+    <string name="privacy_settings">Privacy Settings</string>
+    <string name="advanced_settings">Advanced Settings</string>
+    <string name="accessibility_service">Enable Accessibility Service</string>
+    <string name="accessibility_description">Required for full control of your device</string>
+    <string name="background_service">Run in Background</string>
+    <string name="background_description">Keep AI running when app is closed</string>
+    <string name="data_collection">Data Collection</string>
+    <string name="data_description">Collect usage data to improve AI</string>
+    <string name="save_settings">Save Settings</string>
+    <string name="reset_ai">Reset AI</string>
+    <string name="reset_description">Delete all learned patterns and start fresh</string>
+    
+    <!-- Preference Categories -->
+    <string name="pref_category_ai_behavior">AI Behavior</string>
+    <string name="pref_category_permissions">Permissions</string>
+    <string name="pref_category_performance">Performance</string>
+    <string name="pref_category_privacy">Privacy</string>
+    <string name="pref_category_advanced">Advanced</string>
+    <string name="pref_category_about">About</string>
+    
+    <!-- AI Behavior Preferences -->
+    <string name="pref_ai_mode_title">AI Mode</string>
+    <string name="pref_ai_mode_summary">Choose how the AI will behave and interact with your device</string>
+    <string name="pref_learning_title">Enable Learning</string>
+    <string name="pref_learning_summary">Allow the AI to learn from your actions and improve over time</string>
+    <string name="pref_background_service_title">Background Service</string>
+    <string name="pref_background_service_summary">Keep the AI running in the background when app is closed</string>
+    
+    <!-- Permission Preferences -->
+    <string name="pref_accessibility_title">Accessibility Service</string>
+    <string name="pref_accessibility_summary">Required for the AI to interact with apps on your device</string>
+    <string name="pref_overlay_title">Display Overlay</string>
+    <string name="pref_overlay_summary">Allow drawing over other apps for visual feedback</string>
+    <string name="pref_device_admin_title">Device Admin</string>
+    <string name="pref_device_admin_summary">Required for advanced device control features</string>
+    <string name="pref_usage_stats_title">Usage Statistics</string>
+    <string name="pref_usage_stats_summary">Required to track app usage for better automation</string>
+    <string name="permission_granted">Permission granted</string>
+    <string name="permission_not_granted">Permission not granted</string>
+    
+    <!-- Performance Preferences -->
+    <string name="pref_battery_optimization_title">Disable Battery Optimization</string>
+    <string name="pref_battery_optimization_summary">Allow the AI to run without battery optimization restrictions</string>
+    <string name="pref_low_power_mode_title">Low Power Mode</string>
+    <string name="pref_low_power_mode_summary">Reduce AI functionality to save battery</string>
+    <string name="battery_optimization_disabled">Battery optimization disabled</string>
+    <string name="battery_optimization_enabled">Battery optimization enabled</string>
+    
+    <!-- Privacy Preferences -->
+    <string name="pref_privacy_mode_title">Privacy Mode</string>
+    <string name="pref_privacy_mode_summary">Limit data collection and cloud connections</string>
+    <string name="pref_clear_data_title">Clear Learned Data</string>
+    <string name="pref_clear_data_summary">Delete all data that the AI has learned about your usage patterns</string>
+    <string name="pref_export_data_title">Export Your Data</string>
+    <string name="pref_export_data_summary">Export all your personal data in machine-readable format</string>
+    
+    <!-- Advanced Preferences -->
+    <string name="pref_reset_ai_title">Reset AI</string>
+    <string name="pref_reset_ai_summary">Reset all AI learning and start fresh</string>
+    <string name="pref_developer_mode_title">Developer Mode</string>
+    <string name="pref_developer_mode_summary">Enable advanced debugging and development features</string>
+    <string name="reset_confirmation">Are you sure you want to reset your AI? This cannot be undone.</string>
+    
+    <!-- About Preferences -->
+    <string name="pref_version_title">Version</string>
+    <string name="app_version">1.0.0-beta</string>
+    <string name="pref_licenses_title">Open Source Licenses</string>
+    <string name="pref_licenses_summary">View license information for open source software</string>
+    
+    <!-- Dialogs -->
+    <string name="dialog_confirm">Confirm</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="dialog_reset_title">Reset AI Learning</string>
+    <string name="dialog_reset_message">This will delete all learned patterns and your AI will start fresh. This action cannot be undone.</string>
+
+    <!-- Arrays -->
+    <string-array name="ai_mode_entries">
+        <item>Passive (Observation Only)</item>
+        <item>Balanced (Suggest Actions)</item>
+        <item>Proactive (Auto-Execute When Confident)</item>
+        <item>Aggressive (Maximum Automation)</item>
+        <item>Custom</item>
+    </string-array>
+    
+    <string-array name="ai_mode_values">
+        <item>passive</item>
+        <item>balanced</item>
+        <item>proactive</item>
+        <item>aggressive</item>
+        <item>custom</item>
+    </string-array>
+    
+    <!-- Missing Strings from Error Log -->
+    <string name="select_date">Select Date</string>
+    <string name="select_time">Select Time</string>
+    <string name="action_sequence">Action Sequence</string>
+    <string name="action_sequence_info">Define a sequence of actions for this task</string>
+    <string name="task_scheduler">Task Scheduler</string>
+    <string name="no_learning_sources">No learning sources available. Add a source to get started.</string>
+    <string name="ai_settings">AI Settings</string>
+    <string name="storage_settings">Storage Settings</string>
+    <string name="about">About</string>
+    <string name="task_scheduler_title">Task Scheduler</string>
+    <string name="task_scheduler_subtitle">Create and manage automated tasks</string>
+    <string name="no_tasks_yet">No tasks scheduled yet. Create a new task to get started.</string>
+    
+    <!-- Additional Missing Strings from Error Log -->
+    <string name="new_task">New Task</string>
+    <string name="upcoming_tasks">Upcoming Tasks</string>
+    <string name="task_history">Task History</string>
+    <string name="add_action">Add Action</string>
+    <string name="conditions">Conditions</string>
+    <string name="add_condition">Add Condition</string>
+    <string name="task_priority">Task Priority</string>
+    <string name="save_task">Save Task</string>
+    <string name="execute_task">Execute Task</string>
+    <string name="edit_task">Edit Task</string>
+    <string name="delete_task">Delete Task</string>
+    <string name="scheduled_for">Scheduled for</string>
+    
+    <!-- Missing Nav Graph and Learning Source Strings -->
+    <string name="home">Home</string>
+    <string name="ai">AI</string>
+    <string name="learning">Learning</string>
+    <string name="settings">Settings</string>
+    <string name="learning_source_icon">Learning Source Icon</string>
+    
+    <!-- Task Priority and Schedule Options -->
+    <string-array name="priority_options">
+        <item>Low</item>
+        <item>Medium</item>
+        <item>High</item>
+        <item>Critical</item>
+    </string-array>
+    
+    <string-array name="schedule_options">
+        <item>Once</item>
+        <item>Daily</item>
+        <item>Weekly</item>
+        <item>Monthly</item>
+        <item>Custom</item>
+    </string-array>
+</resources>

@@ -1,0 +1,977 @@
+package com.aiassistant.ml;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.PointF;
+import android.graphics.Rect;
+
+import com.aiassistant.core.AIController;
+import com.aiassistant.detection.GameAppElementDetector;
+import com.aiassistant.models.AppInfo;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * Predictive Action System for game play
+ * 
+ * Predicts and generates game actions based on game state analysis
+ */
+public class PredictiveActionSystem {
+    
+    private Context context;
+    private AIController aiController;
+    private AIController.GameType currentGameType = AIController.GameType.OTHER;
+    private List<SuggestionListener> suggestionListeners = new ArrayList<>();
+    
+    /**
+     * Constructor with context and AI controller
+     * 
+     * @param context Application context
+     * @param aiController AI controller instance
+     */
+    public PredictiveActionSystem(Context context, AIController aiController) {
+        this.context = context;
+        this.aiController = aiController;
+    }
+    
+    /**
+     * Default constructor
+     */
+    public PredictiveActionSystem() {
+        // Default constructor
+    }
+    
+    /**
+     * Select an action based on the current state vector
+     * 
+     * @param stateVector Map of state data or float array representing the state
+     * @return Selected action as an integer
+     */
+    public int selectAction(Map<String, Object> stateVector) {
+        // Implementation would analyze the state vector and return an appropriate action
+        // For now, return a default action (0)
+        return 0;
+    }
+    
+    /**
+     * Select an action based on the state vector as a float array
+     * 
+     * @param stateVector Float array representing the state
+     * @return Selected action as an integer
+     */
+    public int selectAction(float[] stateVector) {
+        // Convert float array to map for compatibility with the main selectAction method
+        Map<String, Object> stateMap = new HashMap<>();
+        if (stateVector != null) {
+            for (int i = 0; i < stateVector.length; i++) {
+                stateMap.put("state_" + i, stateVector[i]);
+            }
+        }
+        return selectAction(stateMap);
+    }
+    
+    /**
+     * Select an action based on a generic object representing the state
+     * 
+     * @param state Object representing the state
+     * @return Selected action as an integer
+     */
+    public int selectAction(Object state) {
+        if (state instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> stateMap = (Map<String, Object>) state;
+            return selectAction(stateMap);
+        } else if (state instanceof float[]) {
+            return selectAction((float[]) state);
+        } else {
+            // Handle unknown state format
+            return 0;
+        }
+    }
+    
+    /**
+     * Constructor with context only
+     * 
+     * @param context Application context
+     */
+    public PredictiveActionSystem(Context context) {
+        this.context = context;
+        this.aiController = null;
+    }
+    
+    /**
+     * Get a singleton instance
+     * 
+     * @param context Application context
+     * @return Singleton instance
+     */
+    public static PredictiveActionSystem getInstance(Context context) {
+        // This is a simplified singleton pattern
+        return new PredictiveActionSystem(context, null);
+    }
+    
+    /**
+     * Initialize the system
+     */
+    public void initialize() {
+        // Initialize prediction models and systems
+    }
+    
+    /**
+     * Release resources
+     */
+    public void release() {
+        // Release resources
+        suggestionListeners.clear();
+    }
+    
+    /**
+     * Start the system
+     */
+    public void start() {
+        // Start processing
+    }
+    
+    /**
+     * Stop the system
+     */
+    public void stop() {
+        // Stop processing
+    }
+    
+    /**
+     * Set the current game type
+     * 
+     * @param gameType Game type string
+     */
+    public void setGameType(String gameType) {
+        // Convert string to AIController.GameType
+        if (gameType == null || gameType.isEmpty()) {
+            this.currentGameType = AIController.GameType.OTHER;
+            return;
+        }
+        
+        String lowerGameType = gameType.toLowerCase();
+        switch (lowerGameType) {
+            case "action":
+                this.currentGameType = AIController.GameType.ACTION;
+                break;
+            case "strategy":
+                this.currentGameType = AIController.GameType.STRATEGY;
+                break;
+            case "puzzle":
+                this.currentGameType = AIController.GameType.PUZZLE;
+                break;
+            case "racing":
+                this.currentGameType = AIController.GameType.RACING;
+                break;
+            case "sports":
+                this.currentGameType = AIController.GameType.SPORTS;
+                break;
+            case "arcade":
+                this.currentGameType = AIController.GameType.ARCADE;
+                break;
+            default:
+                this.currentGameType = AIController.GameType.OTHER;
+                break;
+        }
+    }
+    
+    /**
+     * Set the current game type
+     * 
+     * @param gameType Game type
+     */
+    public void setGameType(AIController.GameType gameType) {
+        this.currentGameType = gameType;
+    }
+    
+    /**
+     * Process a frame from the game
+     * 
+     * @param frame Frame bitmap
+     * @param elements Detected UI elements
+     */
+    public void processFrame(Bitmap frame, List<GameAppElementDetector.UIElement> elements) {
+        // Process frame and detected elements
+    }
+    
+    /**
+     * Get the current game state
+     * 
+     * @return Current game state
+     */
+    public GameState getCurrentState() {
+        // Return a default state for now
+        return new GameState();
+    }
+    
+    /**
+     * Get suggestions for the current app
+     * 
+     * @param app Current app info
+     * @param contextData Context data
+     */
+    public void getSuggestions(AppInfo app, Map<String, Object> contextData) {
+        // Generate suggestions based on app and context
+    }
+    
+    /**
+     * Interface for suggestion listeners
+     */
+    public interface SuggestionListener {
+        /**
+         * Called when a new suggestion is available
+         * 
+         * @param suggestions List of action suggestions
+         */
+        void onSuggestionAvailable(List<com.aiassistant.ml.ActionSuggestion> suggestions);
+        
+        /**
+         * Called when an error occurs during suggestion generation
+         * 
+         * @param error Error message
+         */
+        void onSuggestionError(String error);
+    }
+    
+    /**
+     * Interface for prediction callbacks
+     */
+    public interface PredictionCallback {
+        /**
+         * Called when a new action recommendation is available
+         * 
+         * @param action Recommended game action
+         */
+        void onActionRecommendation(GameAction action);
+        
+        /**
+         * Called when an error occurs during action prediction
+         * 
+         * @param error Error message
+         */
+        void onPredictionError(String error);
+    }
+    
+    /**
+     * Add a suggestion listener
+     * 
+     * @param listener Listener to add
+     */
+    public void addSuggestionListener(SuggestionListener listener) {
+        if (listener != null && !suggestionListeners.contains(listener)) {
+            suggestionListeners.add(listener);
+        }
+    }
+    
+    /**
+     * Remove a suggestion listener
+     * 
+     * @param listener Listener to remove
+     */
+    public void removeSuggestionListener(SuggestionListener listener) {
+        suggestionListeners.remove(listener);
+    }
+    
+    // List of registered prediction callbacks
+    private List<PredictionCallback> predictionCallbacks = new ArrayList<>();
+    
+    // Current game state
+    private GameState currentState;
+    
+    /**
+     * Register a prediction callback
+     * 
+     * @param callback Callback to register
+     */
+    public void registerCallback(PredictionCallback callback) {
+        if (callback != null && !predictionCallbacks.contains(callback)) {
+            predictionCallbacks.add(callback);
+        }
+    }
+    
+    /**
+     * Unregister a prediction callback
+     * 
+     * @param callback Callback to unregister
+     */
+    public void unregisterCallback(PredictionCallback callback) {
+        predictionCallbacks.remove(callback);
+    }
+    
+    /**
+     * Get the current game state
+     * 
+     * @return The current game state or null if no state is available
+     */
+    public GameState getCurrentState() {
+        return currentState;
+    }
+    
+    /**
+     * Get statistics about the system
+     * 
+     * @return Map of statistics
+     */
+    public Map<String, Object> getStats() {
+        Map<String, Object> stats = new HashMap<>();
+        
+        // Add basic statistics
+        stats.put("predictionsGenerated", 0);
+        stats.put("accuracy", 0.0f);
+        stats.put("callbacksRegistered", predictionCallbacks.size());
+        stats.put("listenersRegistered", suggestionListeners.size());
+        
+        // Add performance statistics
+        stats.put("avgPredictionTime", 0.0f);
+        stats.put("successfulPredictions", 0);
+        
+        return stats;
+    }
+    
+    /**
+     * Types of actions the system can predict
+     */
+    public enum ActionType {
+        TAP("tap"),
+        SWIPE("swipe"),
+        LONG_PRESS("long_press"),
+        MULTI_TAP("multi_tap"),
+        DRAG("drag"),
+        PINCH("pinch"),
+        ZOOM("zoom"),
+        ROTATE("rotate"),
+        CUSTOM("custom");
+        
+        private final String value;
+        
+        ActionType(String value) {
+            this.value = value;
+        }
+        
+        public String getValue() {
+            return value;
+        }
+        
+        @NonNull
+        public static ActionType fromString(String value) {
+            if (value == null) {
+                return TAP;
+            }
+            
+            String lowerValue = value.toLowerCase();
+            
+            for (ActionType actionType : values()) {
+                if (actionType.value.equals(lowerValue)) {
+                    return actionType;
+                }
+            }
+            
+            return TAP;
+        }
+        
+        @Override
+        public String toString() {
+            return value;
+        }
+    }
+    
+    /**
+     * Represents a game action to be performed
+     */
+    public static class GameAction {
+        private final String id;
+        private final ActionType type;
+        private final Map<String, Object> parameters;
+        private float priority;
+        private float confidence;
+        private String displayName;
+        private AIController.GameType gameType;
+        
+        /**
+         * Create a new game action
+         * 
+         * @param type Action type
+         * @param parameters Action parameters
+         * @param priority Action priority (0.0-1.0)
+         * @param confidence Confidence in the action (0.0-1.0)
+         */
+        public GameAction(
+                @NonNull ActionType type,
+                @Nullable Map<String, Object> parameters,
+                float priority,
+                float confidence) {
+            this.id = UUID.randomUUID().toString();
+            this.type = type;
+            this.parameters = parameters != null ? new HashMap<>(parameters) : new HashMap<>();
+            this.priority = Math.max(0.0f, Math.min(1.0f, priority));
+            this.confidence = Math.max(0.0f, Math.min(1.0f, confidence));
+            this.displayName = generateDisplayName();
+            this.gameType = AIController.GameType.OTHER;
+        }
+        
+        /**
+         * Create a new game action with default values
+         * 
+         * @param type Action type
+         */
+        public GameAction(@NonNull ActionType type) {
+            this(type, null, 0.5f, 0.5f);
+        }
+        
+        /**
+         * Get the action ID
+         * 
+         * @return Action ID
+         */
+        @NonNull
+        public String getId() {
+            return id;
+        }
+        
+        /**
+         * Get the action type
+         * 
+         * @return Action type
+         */
+        @NonNull
+        public ActionType getType() {
+            return type;
+        }
+        
+        /**
+         * Get the action parameters
+         * 
+         * @return Unmodifiable map of parameters
+         */
+        @NonNull
+        public Map<String, Object> getParameters() {
+            return Collections.unmodifiableMap(parameters);
+        }
+        
+        /**
+         * Add a parameter to the action
+         * 
+         * @param key Parameter key
+         * @param value Parameter value
+         */
+        public void addParameter(@NonNull String key, @Nullable Object value) {
+            parameters.put(key, value);
+        }
+        
+        /**
+         * Get a parameter value
+         * 
+         * @param key Parameter key
+         * @param <T> Parameter type
+         * @return Parameter value or null if not found
+         */
+        @SuppressWarnings("unchecked")
+        @Nullable
+        public <T> T getParameter(@NonNull String key) {
+            return (T) parameters.get(key);
+        }
+        
+        /**
+         * Get a parameter value with a default
+         * 
+         * @param key Parameter key
+         * @param defaultValue Default value if parameter not found
+         * @param <T> Parameter type
+         * @return Parameter value or default
+         */
+        @SuppressWarnings("unchecked")
+        public <T> T getParameter(@NonNull String key, T defaultValue) {
+            Object value = parameters.get(key);
+            if (value == null) {
+                return defaultValue;
+            }
+            
+            try {
+                return (T) value;
+            } catch (ClassCastException e) {
+                return defaultValue;
+            }
+        }
+        
+        /**
+         * Check if the action has a parameter
+         * 
+         * @param key Parameter key
+         * @return Whether the parameter exists
+         */
+        public boolean hasParameter(@NonNull String key) {
+            return parameters.containsKey(key);
+        }
+        
+        /**
+         * Get the action priority
+         * 
+         * @return Priority (0.0-1.0)
+         */
+        public float getPriority() {
+            return priority;
+        }
+        
+        /**
+         * Set the action priority
+         * 
+         * @param priority Priority (0.0-1.0)
+         */
+        public void setPriority(float priority) {
+            this.priority = Math.max(0.0f, Math.min(1.0f, priority));
+        }
+        
+        /**
+         * Get the action confidence
+         * 
+         * @return Confidence (0.0-1.0)
+         */
+        public float getConfidence() {
+            return confidence;
+        }
+        
+        /**
+         * Set the action confidence
+         * 
+         * @param confidence Confidence (0.0-1.0)
+         */
+        public void setConfidence(float confidence) {
+            this.confidence = Math.max(0.0f, Math.min(1.0f, confidence));
+        }
+        
+        /**
+         * Get the action display name
+         * 
+         * @return Display name
+         */
+        @NonNull
+        public String getDisplayName() {
+            return displayName;
+        }
+        
+        /**
+         * Set the action display name
+         * 
+         * @param displayName Display name
+         */
+        public void setDisplayName(@NonNull String displayName) {
+            this.displayName = displayName;
+        }
+        
+        /**
+         * Get the game type
+         * 
+         * @return Game type
+         */
+        @NonNull
+        public AIController.GameType getGameType() {
+            return gameType;
+        }
+        
+        /**
+         * Set the game type
+         * 
+         * @param gameType Game type
+         */
+        public void setGameType(@NonNull AIController.GameType gameType) {
+            this.gameType = gameType;
+        }
+        
+        /**
+         * Get the action location if available
+         * 
+         * @return Location point or null if not specified
+         */
+        @Nullable
+        public PointF getLocation() {
+            if (parameters.containsKey("x") && parameters.containsKey("y")) {
+                try {
+                    float x = 0;
+                    float y = 0;
+                    
+                    Object xObj = parameters.get("x");
+                    Object yObj = parameters.get("y");
+                    
+                    if (xObj instanceof Number) {
+                        x = ((Number) xObj).floatValue();
+                    } else if (xObj instanceof String) {
+                        x = Float.parseFloat((String) xObj);
+                    }
+                    
+                    if (yObj instanceof Number) {
+                        y = ((Number) yObj).floatValue();
+                    } else if (yObj instanceof String) {
+                        y = Float.parseFloat((String) yObj);
+                    }
+                    
+                    return new PointF(x, y);
+                } catch (NumberFormatException e) {
+                    return null;
+                }
+            } else if (parameters.containsKey("location") && parameters.get("location") instanceof PointF) {
+                return (PointF) parameters.get("location");
+            }
+            
+            return null;
+        }
+        
+        /**
+         * Set the action location
+         * 
+         * @param x X coordinate
+         * @param y Y coordinate
+         */
+        public void setLocation(float x, float y) {
+            parameters.put("x", x);
+            parameters.put("y", y);
+        }
+        
+        /**
+         * Get the action bounds if available
+         * 
+         * @return Bounds rectangle or null if not specified
+         */
+        @Nullable
+        public Rect getBounds() {
+            if (parameters.containsKey("bounds") && parameters.get("bounds") instanceof Rect) {
+                return (Rect) parameters.get("bounds");
+            }
+            
+            return null;
+        }
+        
+        /**
+         * Set the action bounds
+         * 
+         * @param bounds Bounds rectangle
+         */
+        public void setBounds(@NonNull Rect bounds) {
+            parameters.put("bounds", bounds);
+        }
+        
+        /**
+         * Generate a display name based on action type and parameters
+         * 
+         * @return Generated display name
+         */
+        private String generateDisplayName() {
+            StringBuilder name = new StringBuilder(type.toString().toUpperCase());
+            
+            if (parameters.containsKey("target")) {
+                name.append(" on ").append(parameters.get("target"));
+            } else if (parameters.containsKey("item")) {
+                name.append(" ").append(parameters.get("item"));
+            } else if (parameters.containsKey("action_name")) {
+                name = new StringBuilder(parameters.get("action_name").toString());
+            }
+            
+            return name.toString();
+        }
+        
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            GameAction that = (GameAction) o;
+            return id.equals(that.id);
+        }
+        
+        @Override
+        public int hashCode() {
+            return Objects.hash(id);
+        }
+        
+        @Override
+        public String toString() {
+            return "GameAction{" +
+                    "type=" + type +
+                    ", priority=" + priority +
+                    ", confidence=" + confidence +
+                    ", name='" + displayName + '\'' +
+                    '}';
+        }
+    }
+    
+    /**
+     * Represents a game state at a point in time
+     */
+    public static class GameState {
+        private final String id;
+        private final long timestamp;
+        private final List<GameAppElementDetector.UIElement> elements;
+        private final Map<String, Object> stateData;
+        private final Map<String, Object> metadata;
+        
+        /**
+         * Create a new game state
+         * 
+         * @param elements UI elements in the game state
+         * @param stateData Additional state data
+         * @param metadata Metadata about the state
+         */
+        public GameState(
+                @Nullable List<GameAppElementDetector.UIElement> elements,
+                @Nullable Map<String, Object> stateData,
+                @Nullable Map<String, Object> metadata) {
+            this.id = UUID.randomUUID().toString();
+            this.timestamp = System.currentTimeMillis();
+            this.elements = elements != null ? 
+                    new ArrayList<>(elements) : new ArrayList<>();
+            this.stateData = stateData != null ? 
+                    new HashMap<>(stateData) : new HashMap<>();
+            this.metadata = metadata != null ? 
+                    new HashMap<>(metadata) : new HashMap<>();
+        }
+        
+        /**
+         * Create a new game state with default values
+         */
+        public GameState() {
+            this(null, null, null);
+        }
+        
+        /**
+         * Get the state ID
+         * 
+         * @return State ID
+         */
+        @NonNull
+        public String getId() {
+            return id;
+        }
+        
+        /**
+         * Get the state timestamp
+         * 
+         * @return Timestamp in milliseconds
+         */
+        public long getTimestamp() {
+            return timestamp;
+        }
+        
+        /**
+         * Get the UI elements in the state
+         * 
+         * @return Unmodifiable list of UI elements
+         */
+        @NonNull
+        public List<GameAppElementDetector.UIElement> getElements() {
+            return Collections.unmodifiableList(elements);
+        }
+        
+        /**
+         * Get the state data
+         * 
+         * @return Unmodifiable map of state data
+         */
+        @NonNull
+        public Map<String, Object> getStateData() {
+            return Collections.unmodifiableMap(stateData);
+        }
+        
+        /**
+         * Get the state metadata
+         * 
+         * @return Unmodifiable map of metadata
+         */
+        @NonNull
+        public Map<String, Object> getMetadata() {
+            return Collections.unmodifiableMap(metadata);
+        }
+        
+        /**
+         * Add an element to the state
+         * 
+         * @param element UI element to add
+         */
+        public void addElement(@NonNull GameAppElementDetector.UIElement element) {
+            elements.add(element);
+        }
+        
+        /**
+         * Add state data
+         * 
+         * @param key Data key
+         * @param value Data value
+         */
+        public void addStateData(@NonNull String key, @Nullable Object value) {
+            stateData.put(key, value);
+        }
+        
+        /**
+         * Add metadata
+         * 
+         * @param key Metadata key
+         * @param value Metadata value
+         */
+        public void addMetadata(@NonNull String key, @Nullable Object value) {
+            metadata.put(key, value);
+        }
+        
+        /**
+         * Get an element by ID
+         * 
+         * @param elementId Element ID
+         * @return UI element or null if not found
+         */
+        @Nullable
+        public GameAppElementDetector.UIElement getElementById(@NonNull String elementId) {
+            for (GameAppElementDetector.UIElement element : elements) {
+                if (element.getId().equals(elementId)) {
+                    return element;
+                }
+            }
+            return null;
+        }
+        
+        /**
+         * Get elements by type
+         * 
+         * @param elementType Element type
+         * @return List of UI elements of the specified type
+         */
+        @NonNull
+        public List<GameAppElementDetector.UIElement> getElementsByType(@NonNull String elementType) {
+            List<GameAppElementDetector.UIElement> result = new ArrayList<>();
+            for (GameAppElementDetector.UIElement element : elements) {
+                if (element.getType().equals(elementType)) {
+                    result.add(element);
+                }
+            }
+            return result;
+        }
+        
+        /**
+         * Get a state data value
+         * 
+         * @param key Data key
+         * @param <T> Data type
+         * @return Data value or null if not found
+         */
+        @SuppressWarnings("unchecked")
+        @Nullable
+        public <T> T getStateDataValue(@NonNull String key) {
+            return (T) stateData.get(key);
+        }
+        
+        /**
+         * Get a state data value with a default
+         * 
+         * @param key Data key
+         * @param defaultValue Default value if data not found
+         * @param <T> Data type
+         * @return Data value or default
+         */
+        @SuppressWarnings("unchecked")
+        public <T> T getStateDataValue(@NonNull String key, T defaultValue) {
+            Object value = stateData.get(key);
+            if (value == null) {
+                return defaultValue;
+            }
+            
+            try {
+                return (T) value;
+            } catch (ClassCastException e) {
+                return defaultValue;
+            }
+        }
+        
+        /**
+         * Get a metadata value
+         * 
+         * @param key Metadata key
+         * @param <T> Metadata type
+         * @return Metadata value or null if not found
+         */
+        @SuppressWarnings("unchecked")
+        @Nullable
+        public <T> T getMetadataValue(@NonNull String key) {
+            return (T) metadata.get(key);
+        }
+        
+        /**
+         * Get a metadata value with a default
+         * 
+         * @param key Metadata key
+         * @param defaultValue Default value if metadata not found
+         * @param <T> Metadata type
+         * @return Metadata value or default
+         */
+        @SuppressWarnings("unchecked")
+        public <T> T getMetadataValue(@NonNull String key, T defaultValue) {
+            Object value = metadata.get(key);
+            if (value == null) {
+                return defaultValue;
+            }
+            
+            try {
+                return (T) value;
+            } catch (ClassCastException e) {
+                return defaultValue;
+            }
+        }
+        
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            GameState that = (GameState) o;
+            return id.equals(that.id);
+        }
+        
+        @Override
+        public int hashCode() {
+            return Objects.hash(id);
+        }
+        
+        @Override
+        public String toString() {
+            return "GameState{" +
+                    "id='" + id + '\'' +
+                    ", timestamp=" + timestamp +
+                    ", elements=" + elements.size() +
+                    '}';
+        }
+    }
+    
+    /**
+     * Callback interface for prediction notifications
+     */
+    public interface PredictionCallback {
+        /**
+         * Called when a state prediction is made
+         * 
+         * @param currentState Current game state
+         * @param predictedState Predicted future game state
+         */
+        void onStatePrediction(GameState currentState, GameState predictedState);
+        
+        /**
+         * Called when an action is recommended
+         * 
+         * @param recommendedAction Recommended action
+         */
+        void onActionRecommendation(GameAction recommendedAction);
+    }
+    
+    /**
+     * Register a prediction callback
+     * 
+     * @param callback Callback to register
+     */
+    public void registerCallback(PredictionCallback callback) {
+        // Implementation would go here
+    }
+    
+    // We now use AIController.GameType instead of a local GameType enum
+}

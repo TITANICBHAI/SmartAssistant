@@ -1,0 +1,660 @@
+package models;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * System for understanding and applying game rules.
+ */
+public class GameRuleUnderstanding {
+    private static GameRuleUnderstanding instance;
+    private Context context;
+    private RuleExtractionSystem ruleExtractor;
+    private Map<String, List<GamePattern>> detectedPatterns;
+    private boolean isActive;
+    private String gameType;
+    
+    /**
+     * Private constructor for singleton pattern
+     */
+    private GameRuleUnderstanding(Context context) {
+        this.context = context;
+        this.ruleExtractor = RuleExtractionSystem.getInstance(context);
+        this.detectedPatterns = new HashMap<>();
+        this.isActive = false;
+    }
+    
+    /**
+     * Get the singleton instance
+     * 
+     * @param context Application context
+     * @return GameRuleUnderstanding instance
+     */
+    public static synchronized GameRuleUnderstanding getInstance(Context context) {
+        if (instance == null) {
+            instance = new GameRuleUnderstanding(context);
+        }
+        return instance;
+    }
+    
+    /**
+     * Get the singleton instance (no-arg version for backward compatibility)
+     */
+    public static synchronized GameRuleUnderstanding getInstance() {
+        if (instance == null) {
+            throw new IllegalStateException("GameRuleUnderstanding not initialized. Call getInstance(Context) first.");
+        }
+        return instance;
+    }
+    
+    /**
+     * Start rule understanding
+     */
+    public void start() {
+        isActive = true;
+        ruleExtractor.start();
+    }
+    
+    /**
+     * Stop rule understanding
+     */
+    public void stop() {
+        isActive = false;
+        ruleExtractor.stop();
+    }
+    
+    /**
+     * Set the game type for rule customization
+     * 
+     * @param gameType Type of game
+     */
+    public void setGameType(String gameType) {
+        if (gameType != null && !gameType.isEmpty()) {
+            this.gameType = gameType;
+        }
+    }
+    
+    /**
+     * Record a game observation
+     * 
+     * @param gameId Game identifier
+     * @param before State before action
+     * @param action Action performed
+     * @param after State after action
+     * @param reward Reward received
+     * @return Extracted rules
+     */
+    public List<GameRule> recordObservation(String gameId, Map<String, Object> before, 
+                                        String action, Map<String, Object> after,
+                                        double reward) {
+        if (!isActive) {
+            return new ArrayList<>();
+        }
+        
+        GameObservation observation = new GameObservation(before, action, after, reward);
+        
+        // Let the rule extractor process this observation
+        List<GameRule> rules = ruleExtractor.processObservation(gameId, observation);
+        
+        // Look for patterns
+        detectPatterns(gameId, observation);
+        
+        return rules;
+    }
+    
+    /**
+     * Detect patterns in observations
+     * 
+     * @param gameId Game identifier
+     * @param observation New observation
+     */
+    private void detectPatterns(String gameId, GameObservation observation) {
+        if (!detectedPatterns.containsKey(gameId)) {
+            detectedPatterns.put(gameId, new ArrayList<>());
+        }
+        
+        List<GamePattern> patterns = detectedPatterns.get(gameId);
+        
+        // Update existing patterns
+        for (GamePattern pattern : patterns) {
+            if (pattern.matchesObservation(observation)) {
+                pattern.addObservation(observation);
+            }
+        }
+        
+        // Try to detect new patterns (extremely simplified)
+        if (observation.getReward() > 0) {
+            // If positive reward, this might be a pattern worth tracking
+            GamePattern newPattern = new GamePattern();
+            newPattern.setName("Pattern-" + System.currentTimeMillis());
+            newPattern.setDescription("Pattern involving " + observation.getAction());
+            newPattern.addObservation(observation);
+            
+            // Check if similar pattern already exists
+            boolean similar = false;
+            for (GamePattern existing : patterns) {
+                if (existing.isSimilarTo(newPattern)) {
+                    similar = true;
+                    break;
+                }
+            }
+            
+            if (!similar) {
+                patterns.add(newPattern);
+            }
+        }
+    }
+    
+    /**
+     * Predict outcome of an action
+     * 
+     * @param gameId Game identifier
+     * @param currentState Current game state
+     * @param action Proposed action
+     * @return Predicted next state and reward
+     */
+    public Map<String, Object> predictOutcome(String gameId, Map<String, Object> currentState, String action) {
+        if (!isActive || currentState == null || action == null) {
+            return new HashMap<>();
+        }
+        
+        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> predictedState = new HashMap<>(currentState);
+        double predictedReward = 0.0;
+        
+        // Apply known rules to predict the outcome
+        List<GameRule> rules = ruleExtractor.getRulesForGame(gameId);
+        
+        for (GameRule rule : rules) {
+            if (ruleAppliesToState(rule, currentState, action)) {
+                // Apply the rule effect to state prediction
+                applyRuleEffect(rule, predictedState);
+                
+                // Add rule's confidence to predicted reward
+                predictedReward += rule.getConfidence() * 0.1;
+            }
+        }
+        
+        // Apply known patterns
+        if (detectedPatterns.containsKey(gameId)) {
+            for (GamePattern pattern : detectedPatterns.get(gameId)) {
+                if (pattern.matchesInitialState(currentState, action)) {
+                    // Use pattern to enhance prediction
+                    pattern.enhancePrediction(predictedState);
+                    
+                    // Adjust predicted reward based on pattern
+                    predictedReward += pattern.getAverageReward();
+                }
+            }
+        }
+        
+        result.put("predicted_state", predictedState);
+        result.put("predicted_reward", predictedReward);
+        
+        return result;
+    }
+    
+    /**
+     * Check if rule applies to state and action
+     * 
+     * @param rule Game rule
+     * @param state Current state
+     * @param action Action to perform
+     * @return True if rule applies
+     */
+    private boolean ruleAppliesToState(GameRule rule, Map<String, Object> state, String action) {
+        String condition = rule.getCondition();
+        
+        // Very simplified parsing of condition (action & key=value)
+        if (condition.contains(action) && condition.contains("&")) {
+            String statePart = condition.split("&")[1].trim();
+            if (statePart.contains("=")) {
+                String key = statePart.split("=")[0].trim();
+                String value = statePart.split("=")[1].trim();
+                
+                return state.containsKey(key) && 
+                       value.equals(String.valueOf(state.get(key)));
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Apply rule effect to state
+     * 
+     * @param rule Game rule
+     * @param state State to modify
+     */
+    private void applyRuleEffect(GameRule rule, Map<String, Object> state) {
+        String effect = rule.getEffect();
+        
+        // Very simplified parsing of effect (key=value)
+        if (effect.contains("=")) {
+            String key = effect.split("=")[0].trim();
+            String value = effect.split("=")[1].trim();
+            
+            // Apply the effect (very primitive handling of types)
+            try {
+                // Try to parse as int
+                state.put(key, Integer.parseInt(value));
+            } catch (NumberFormatException e1) {
+                try {
+                    // Try to parse as double
+                    state.put(key, Double.parseDouble(value));
+                } catch (NumberFormatException e2) {
+                    // Treat as string
+                    state.put(key, value);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Get rules for a game
+     * 
+     * @param gameId Game identifier
+     * @return List of rules
+     */
+    public List<GameRule> getRules(String gameId) {
+        return ruleExtractor.getRulesForGame(gameId);
+    }
+    
+    /**
+     * Get patterns for a game
+     * 
+     * @param gameId Game identifier
+     * @return List of patterns
+     */
+    public List<GamePattern> getPatterns(String gameId) {
+        if (detectedPatterns.containsKey(gameId)) {
+            return detectedPatterns.get(gameId);
+        }
+        return new ArrayList<>();
+    }
+    
+    /**
+     * Find relevant rules for a given observation
+     * 
+     * @param observation The game observation
+     * @return List of relevant rules
+     */
+    public List<GameRule> findRelevantRules(GameObservation observation) {
+        if (observation == null) {
+            return new ArrayList<>();
+        }
+        
+        // Use a default game ID for processing
+        String defaultGameId = gameType != null ? gameType : "default";
+        
+        // Get all rules for this game
+        List<GameRule> allRules = getRules(defaultGameId);
+        
+        // For a simple implementation, we'll just return all rules
+        // In a real system, we would filter based on the current game state
+        return allRules;
+    }
+    
+    /**
+     * Find relevant rules for a given state
+     * 
+     * @param state Current game state
+     * @param callback Optional callback for rule processing (can be null)
+     * @return List of relevant rules
+     */
+    public List<GameRule> findRelevantRules(Map<String, Object> state, Object callback) {
+        if (state == null) {
+            return new ArrayList<>();
+        }
+        
+        // Create a temporary observation from this state
+        GameObservation observation = new GameObservation(state, "observe", state, 0.0);
+        
+        // Use the existing method to find relevant rules
+        return findRelevantRules(observation);
+    }
+    
+    /**
+     * Process a game observation directly (without a game ID)
+     * 
+     * @param observation The observation to process
+     * @return Map of extracted features and insights
+     */
+    public Map<String, Object> processObservation(GameObservation observation) {
+        if (!isActive || observation == null) {
+            return new HashMap<>();
+        }
+        
+        // Use a default game ID for processing
+        String defaultGameId = gameType != null ? gameType : "default";
+        
+        // Process the observation through the rule system
+        List<GameRule> rules = recordObservation(defaultGameId, 
+                                               observation.getBeforeState(), 
+                                               observation.getAction(), 
+                                               observation.getAfterState(), 
+                                               observation.getReward());
+        
+        // Prepare results
+        Map<String, Object> results = new HashMap<>();
+        
+        // Add basic stats
+        results.put("rules_count", rules.size());
+        results.put("patterns_count", getPatterns(defaultGameId).size());
+        
+        // Add extracted rules as insights
+        if (!rules.isEmpty()) {
+            List<Map<String, Object>> rulesInfo = new ArrayList<>();
+            for (GameRule rule : rules) {
+                Map<String, Object> ruleInfo = new HashMap<>();
+                ruleInfo.put("name", rule.getName());
+                ruleInfo.put("confidence", rule.getConfidence());
+                rulesInfo.add(ruleInfo);
+            }
+            results.put("rules", rulesInfo);
+        }
+        
+        return results;
+    }
+    
+    /**
+     * Process a game state with UI elements
+     * 
+     * @param stateData Map of state data
+     * @param elements List of detected UI elements
+     */
+    public void processGameState(Map<String, Object> stateData, List<utils.UIElement> elements) {
+        if (!isActive || stateData == null || elements == null) {
+            return;
+        }
+        
+        // Create a combined state that includes UI element information
+        Map<String, Object> enhancedState = new HashMap<>(stateData);
+        
+        // Add UI element counts
+        enhancedState.put("ui_elements_count", elements.size());
+        
+        // Count different types of elements
+        int buttonCount = 0;
+        int textFieldCount = 0;
+        int imageCount = 0;
+        
+        for (utils.UIElement element : elements) {
+            String type = element.getType();
+            if (type != null) {
+                if (type.toLowerCase().contains("button") || element.isClickable()) {
+                    buttonCount++;
+                } else if (type.toLowerCase().contains("text") || type.toLowerCase().contains("edit")) {
+                    textFieldCount++;
+                } else if (type.toLowerCase().contains("image")) {
+                    imageCount++;
+                }
+            }
+        }
+        
+        enhancedState.put("button_count", buttonCount);
+        enhancedState.put("text_field_count", textFieldCount);
+        enhancedState.put("image_count", imageCount);
+        
+        // Create an observation from this state
+        GameObservation observation = new GameObservation(enhancedState, "analyze", enhancedState, 0.0);
+        
+        // Process the observation
+        String defaultGameId = gameType != null ? gameType : "default";
+        recordObservation(defaultGameId, enhancedState, "analyze", enhancedState, 0.0);
+    }
+    
+    /**
+     * Class representing a game observation
+     */
+    public static class GameObservation {
+        private Map<String, Object> beforeState;
+        private String action;
+        private Map<String, Object> afterState;
+        private double reward;
+        private long timestamp;
+        private Bitmap screenshot;
+        
+        /**
+         * Set the action for this observation
+         * 
+         * @param action The action to set
+         */
+        public void setAction(String action) {
+            this.action = action;
+        }
+        
+        /**
+         * Set the reward for this observation
+         * 
+         * @param reward The reward to set
+         */
+        public void setReward(float reward) {
+            this.reward = reward;
+        }
+        
+        /**
+         * Create an observation from before/after states
+         * 
+         * @param beforeState State before action
+         * @param action Action performed
+         * @param afterState State after action
+         * @param reward Reward received
+         */
+        public GameObservation(Map<String, Object> beforeState, String action, 
+                            Map<String, Object> afterState, double reward) {
+            this.beforeState = beforeState;
+            this.action = action;
+            this.afterState = afterState;
+            this.reward = reward;
+            this.timestamp = System.currentTimeMillis();
+        }
+        
+        /**
+         * Create an observation from a screenshot and features
+         * 
+         * @param screenshot Screen bitmap
+         * @param features Extracted features
+         */
+        public GameObservation(Bitmap screenshot, Map<String, Object> features) {
+            this.beforeState = features;
+            this.action = "observe";
+            this.afterState = new HashMap<>(features);
+            this.reward = 0.0;
+            this.timestamp = System.currentTimeMillis();
+            this.screenshot = screenshot;
+        }
+        
+        public Map<String, Object> getBeforeState() {
+            return beforeState;
+        }
+        
+        public String getAction() {
+            return action;
+        }
+        
+        public Map<String, Object> getAfterState() {
+            return afterState;
+        }
+        
+        public double getReward() {
+            return reward;
+        }
+        
+        public long getTimestamp() {
+            return timestamp;
+        }
+        
+        public Bitmap getScreenshot() {
+            return screenshot;
+        }
+    }
+    
+    /**
+     * Class representing a game rule
+     */
+    public static class GameRule {
+        private String name;
+        private String description;
+        private String condition;
+        private String effect;
+        private double confidence;
+        
+        public GameRule() {
+            this.confidence = 0.5; // Default confidence
+        }
+        
+        public String getName() {
+            return name;
+        }
+        
+        public void setName(String name) {
+            this.name = name;
+        }
+        
+        public String getDescription() {
+            return description;
+        }
+        
+        public void setDescription(String description) {
+            this.description = description;
+        }
+        
+        public String getCondition() {
+            return condition;
+        }
+        
+        public void setCondition(String condition) {
+            this.condition = condition;
+        }
+        
+        public String getEffect() {
+            return effect;
+        }
+        
+        public void setEffect(String effect) {
+            this.effect = effect;
+        }
+        
+        public double getConfidence() {
+            return confidence;
+        }
+        
+        public void setConfidence(double confidence) {
+            this.confidence = confidence;
+        }
+    }
+    
+    /**
+     * Class representing a game pattern
+     */
+    public static class GamePattern {
+        private String name;
+        private String description;
+        private List<GameObservation> observations;
+        
+        public GamePattern() {
+            this.observations = new ArrayList<>();
+        }
+        
+        public String getName() {
+            return name;
+        }
+        
+        public void setName(String name) {
+            this.name = name;
+        }
+        
+        public String getDescription() {
+            return description;
+        }
+        
+        public void setDescription(String description) {
+            this.description = description;
+        }
+        
+        public void addObservation(GameObservation observation) {
+            observations.add(observation);
+        }
+        
+        public List<GameObservation> getObservations() {
+            return observations;
+        }
+        
+        public boolean matchesObservation(GameObservation observation) {
+            if (observations.isEmpty() || observation == null) {
+                return false;
+            }
+            
+            // Very simplified: check if action is the same
+            GameObservation template = observations.get(0);
+            return template.getAction().equals(observation.getAction());
+        }
+        
+        public boolean isSimilarTo(GamePattern other) {
+            if (observations.isEmpty() || other.observations.isEmpty()) {
+                return false;
+            }
+            
+            // Very simplified: check if actions are the same
+            return observations.get(0).getAction().equals(
+                   other.observations.get(0).getAction());
+        }
+        
+        public boolean matchesInitialState(Map<String, Object> state, String action) {
+            if (observations.isEmpty() || state == null || action == null) {
+                return false;
+            }
+            
+            // Check if action matches
+            if (!observations.get(0).getAction().equals(action)) {
+                return false;
+            }
+            
+            // Very simplified: check if key states match
+            Map<String, Object> templateState = observations.get(0).getBeforeState();
+            for (String key : templateState.keySet()) {
+                if (state.containsKey(key) && 
+                    !state.get(key).equals(templateState.get(key))) {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        public void enhancePrediction(Map<String, Object> state) {
+            if (observations.isEmpty() || state == null) {
+                return;
+            }
+            
+            // Very simplified: use the most recent observation as template
+            GameObservation template = observations.get(observations.size() - 1);
+            
+            // Copy key states from the template's after-state
+            Map<String, Object> afterState = template.getAfterState();
+            for (String key : afterState.keySet()) {
+                if (!state.containsKey(key)) {
+                    state.put(key, afterState.get(key));
+                }
+            }
+        }
+        
+        public double getAverageReward() {
+            if (observations.isEmpty()) {
+                return 0.0;
+            }
+            
+            double total = 0.0;
+            for (GameObservation obs : observations) {
+                total += obs.getReward();
+            }
+            
+            return total / observations.size();
+        }
+    }
+}

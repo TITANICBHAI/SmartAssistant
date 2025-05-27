@@ -1,0 +1,181 @@
+package com.aiassistant.viewmodels;
+
+import android.app.Application;
+
+import androidx.annotation.NonNull;
+import androidx.lifecycle.AndroidViewModel;
+import androidx.lifecycle.LiveData;
+import androidx.lifecycle.MediatorLiveData;
+import androidx.lifecycle.MutableLiveData;
+
+import com.aiassistant.models.AIModel;
+import com.aiassistant.services.AIService;
+
+/**
+ * ViewModel for managing AI related data and actions.
+ */
+public class AIViewModel extends AndroidViewModel {
+    
+    private final MutableLiveData<AIModel> aiStatus;
+    private final MutableLiveData<String> aiResponse;
+    
+    private AIService aiService;
+    
+    public AIViewModel(@NonNull Application application) {
+        super(application);
+        
+        // Initialize with default values
+        aiStatus = new MutableLiveData<>(new AIModel());
+        aiResponse = new MutableLiveData<>("");
+        
+        // Connect to service when it's available
+        connectToService();
+    }
+    
+    /**
+     * Connect to AIService if it's running
+     */
+    private void connectToService() {
+        // Try to get AIService instance (may not be available right away)
+        aiService = AIService.getInstance();
+        
+        if (aiService != null) {
+            // Observe service LiveData
+            aiService.getAiStatus().observeForever(aiModel -> {
+                if (aiModel != null) {
+                    aiStatus.postValue(aiModel);
+                }
+            });
+            
+            aiService.getAiResponse().observeForever(response -> {
+                if (response != null) {
+                    aiResponse.postValue(response);
+                }
+            });
+        } else {
+            // Service not available yet, retry later
+            new android.os.Handler().postDelayed(this::connectToService, 1000);
+        }
+    }
+    
+    /**
+     * Set auto mode for AI
+     */
+    public void setAutoMode(boolean enabled) {
+        if (aiService != null) {
+            aiService.setAutoMode(enabled);
+        } else {
+            AIModel model = aiStatus.getValue();
+            if (model != null) {
+                model.setAutoMode(enabled);
+                aiStatus.setValue(model);
+            }
+        }
+    }
+    
+    /**
+     * Set copilot mode for AI
+     */
+    public void setCopilotMode(boolean enabled) {
+        if (aiService != null) {
+            aiService.setCopilotMode(enabled);
+        } else {
+            AIModel model = aiStatus.getValue();
+            if (model != null) {
+                model.setCopilotMode(enabled);
+                aiStatus.setValue(model);
+            }
+        }
+    }
+    
+    /**
+     * Set inactivity takeover for AI
+     */
+    public void setInactivityTakeover(boolean enabled) {
+        if (aiService != null) {
+            aiService.setInactivityTakeover(enabled);
+        } else {
+            AIModel model = aiStatus.getValue();
+            if (model != null) {
+                model.setInactivityTakeoverEnabled(enabled);
+                aiStatus.setValue(model);
+            }
+        }
+    }
+    
+    /**
+     * Set inactivity timeout in seconds
+     */
+    public void setInactivityTimeout(int seconds) {
+        if (aiService != null) {
+            aiService.setInactivityTimeout(seconds);
+        } else {
+            AIModel model = aiStatus.getValue();
+            if (model != null) {
+                model.setInactivityTimeoutSeconds(seconds);
+                aiStatus.setValue(model);
+            }
+        }
+    }
+    
+    /**
+     * Set learning mode for AI
+     */
+    public void setLearningEnabled(boolean enabled) {
+        if (aiService != null) {
+            aiService.setLearningEnabled(enabled);
+        } else {
+            AIModel model = aiStatus.getValue();
+            if (model != null) {
+                model.setLearningEnabled(enabled);
+                aiStatus.setValue(model);
+            }
+        }
+    }
+    
+    /**
+     * Set debug mode for AI
+     */
+    public void setDebugMode(boolean enabled) {
+        if (aiService != null) {
+            aiService.setDebugMode(enabled);
+        } else {
+            AIModel model = aiStatus.getValue();
+            if (model != null) {
+                model.setDebugMode(enabled);
+                aiStatus.setValue(model);
+            }
+        }
+    }
+    
+    /**
+     * Send a command to the AI
+     */
+    public void sendCommand(String command) {
+        if (aiService != null) {
+            aiService.processCommand(command);
+        } else {
+            aiResponse.setValue("AI service not connected. Please try again later.");
+        }
+    }
+    
+    /**
+     * Get the current AI status
+     */
+    public LiveData<AIModel> getAiStatus() {
+        return aiStatus;
+    }
+    
+    /**
+     * Get the current AI response
+     */
+    public LiveData<String> getAiResponse() {
+        return aiResponse;
+    }
+    
+    @Override
+    protected void onCleared() {
+        super.onCleared();
+        // Clean up observers if needed
+    }
+}

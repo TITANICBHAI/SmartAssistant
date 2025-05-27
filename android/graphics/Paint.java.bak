@@ -1,0 +1,177 @@
+package android.graphics;
+
+/**
+ * Mock implementation of Android's Paint class for development environment.
+ */
+public class Paint {
+    private int color;
+    private Style style;
+    private float strokeWidth;
+    private int textSize;
+    private int flags;
+    
+    /**
+     * Paint style enum.
+     */
+    public enum Style {
+        FILL,
+        STROKE,
+        FILL_AND_STROKE
+    }
+    
+    /**
+     * Text alignment enum.
+     */
+    public enum Align {
+        LEFT,
+        CENTER,
+        RIGHT
+    }
+    
+    /**
+     * Flag constants.
+     */
+    public static final int ANTI_ALIAS_FLAG = 0x01;
+    public static final int FILTER_BITMAP_FLAG = 0x02;
+    public static final int DITHER_FLAG = 0x04;
+    public static final int UNDERLINE_TEXT_FLAG = 0x08;
+    public static final int STRIKE_THRU_TEXT_FLAG = 0x10;
+    
+    /**
+     * Default constructor.
+     */
+    public Paint() {
+        this.color = 0xFF000000; // Black
+        this.style = Style.FILL;
+        this.strokeWidth = 0;
+        this.textSize = 12;
+        this.flags = 0;
+    }
+    
+    /**
+     * Constructor with flags.
+     */
+    public Paint(int flags) {
+        this();
+        this.flags = flags;
+    }
+    
+    /**
+     * Copy constructor.
+     */
+    public Paint(Paint paint) {
+        this.color = paint.color;
+        this.style = paint.style;
+        this.strokeWidth = paint.strokeWidth;
+        this.textSize = paint.textSize;
+        this.flags = paint.flags;
+    }
+    
+    /**
+     * Set color.
+     */
+    public void setColor(int color) {
+        this.color = color;
+    }
+    
+    /**
+     * Get color.
+     */
+    public int getColor() {
+        return color;
+    }
+    
+    /**
+     * Set style.
+     */
+    public void setStyle(Style style) {
+        this.style = style;
+    }
+    
+    /**
+     * Get style.
+     */
+    public Style getStyle() {
+        return style;
+    }
+    
+    /**
+     * Set stroke width.
+     */
+    public void setStrokeWidth(float width) {
+        this.strokeWidth = width;
+    }
+    
+    /**
+     * Get stroke width.
+     */
+    public float getStrokeWidth() {
+        return strokeWidth;
+    }
+    
+    /**
+     * Set text size.
+     */
+    public void setTextSize(float textSize) {
+        this.textSize = (int) textSize;
+    }
+    
+    /**
+     * Get text size.
+     */
+    public float getTextSize() {
+        return textSize;
+    }
+    
+    /**
+     * Set text alignment.
+     */
+    public void setTextAlign(Align align) {
+        // In a real implementation, this would set the text alignment
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Set flags.
+     */
+    public void setFlags(int flags) {
+        this.flags = flags;
+    }
+    
+    /**
+     * Get flags.
+     */
+    public int getFlags() {
+        return flags;
+    }
+    
+    /**
+     * Measure text width.
+     */
+    public float measureText(String text) {
+        if (text == null) {
+            return 0;
+        }
+        // In a real implementation, this would measure the text width
+        // For development, estimate 0.5 * textSize per character
+        return text.length() * textSize * 0.5f;
+    }
+    
+    /**
+     * Check if anti-alias is enabled.
+     */
+    public boolean isAntiAlias() {
+        return (flags & ANTI_ALIAS_FLAG) != 0;
+    }
+    
+    /**
+     * Set anti-alias.
+     */
+    public void setAntiAlias(boolean aa) {
+        if (aa) {
+            flags |= ANTI_ALIAS_FLAG;
+        } else {
+            flags &= ~ANTI_ALIAS_FLAG;
+        }
+    }
+}

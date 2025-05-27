@@ -1,0 +1,106 @@
+package android.graphics;
+
+/**
+ * Mock implementation of Android's Rect class
+ * Represents a rectangle with integer coordinates
+ */
+public class Rect {
+    public int left;
+    public int top;
+    public int right;
+    public int bottom;
+    
+    /**
+     * Default constructor, creates an empty rectangle
+     */
+    public Rect() {
+        this.left = 0;
+        this.top = 0;
+        this.right = 0;
+        this.bottom = 0;
+    }
+    
+    /**
+     * Create a rectangle with coordinates
+     * 
+     * @param left Left coordinate
+     * @param top Top coordinate
+     * @param right Right coordinate
+     * @param bottom Bottom coordinate
+     */
+    public Rect(int left, int top, int right, int bottom) {
+        this.left = left;
+        this.top = top;
+        this.right = right;
+        this.bottom = bottom;
+    }
+    
+    /**
+     * Copy constructor
+     * 
+     * @param src Source rectangle
+     */
+    public Rect(Rect src) {
+        this.left = src.left;
+        this.top = src.top;
+        this.right = src.right;
+        this.bottom = src.bottom;
+    }
+    
+    /**
+     * Convert to RectF
+     * 
+     * @return RectF version of this rectangle
+     */
+    public RectF toRectF() {
+        return new RectF(left, top, right, bottom);
+    }
+    
+    /**
+     * Check if rectangle is empty
+     * 
+     * @return True if empty
+     */
+    public boolean isEmpty() {
+        return left >= right || top >= bottom;
+    }
+    
+    /**
+     * Get width of rectangle
+     * 
+     * @return Width
+     */
+    public int width() {
+        return right - left;
+    }
+    
+    /**
+     * Get height of rectangle
+     * 
+     * @return Height
+     */
+    public int height() {
+        return bottom - top;
+    }
+    
+    /**
+     * Check if a point is inside the rectangle
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return True if point is inside
+     */
+    public boolean contains(int x, int y) {
+        return left < right && top < bottom && x >= left && x < right && y >= top && y < bottom;
+    }
+    
+    /**
+     * String representation
+     * 
+     * @return Rectangle as string
+     */
+    @Override
+    public String toString() {
+        return "Rect(" + left + ", " + top + ", " + right + ", " + bottom + ")";
+    }
+}

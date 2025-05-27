@@ -1,0 +1,341 @@
+package utils;
+
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Helper class for analyzing and fixing method signature issues
+ * Helps address @Override annotation errors and parameter type mismatches
+ */
+public class MethodSignatureHelper {
+    
+    /**
+     * Represents a method signature
+     */
+    public static class MethodSignature {
+        private String name;
+        private Class<?>[] parameterTypes;
+        private Class<?> returnType;
+        private boolean isStatic;
+        
+        public MethodSignature(String name, Class<?>[] parameterTypes, Class<?> returnType, boolean isStatic) {
+            this.name = name;
+            this.parameterTypes = parameterTypes;
+            this.returnType = returnType;
+            this.isStatic = isStatic;
+        }
+        
+        public String getName() {
+            return name;
+        }
+        
+        public Class<?>[] getParameterTypes() {
+            return parameterTypes;
+        }
+        
+        public Class<?> getReturnType() {
+            return returnType;
+        }
+        
+        public boolean isStatic() {
+            return isStatic;
+        }
+        
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            
+            // Add modifiers
+            if (isStatic) {
+                sb.append("static ");
+            }
+            
+            // Add return type
+            sb.append(returnType.getSimpleName()).append(" ");
+            
+            // Add method name
+            sb.append(name).append("(");
+            
+            // Add parameters
+            for (int i = 0; i < parameterTypes.length; i++) {
+                sb.append(parameterTypes[i].getSimpleName());
+                if (i < parameterTypes.length - 1) {
+                    sb.append(", ");
+                }
+            }
+            
+            sb.append(")");
+            
+            return sb.toString();
+        }
+    }
+    
+    /**
+     * Get method signatures from a class
+     * 
+     * @param clazz The class to analyze
+     * @return List of method signatures
+     */
+    public static List<MethodSignature> getClassMethodSignatures(Class<?> clazz) {
+        List<MethodSignature> signatures = new ArrayList<>();
+        
+        if (clazz == null) {
+            return signatures;
+        }
+        
+        Method[] methods = clazz.getDeclaredMethods();
+        
+        for (Method method : methods) {
+            boolean isStatic = Modifier.isStatic(method.getModifiers());
+            MethodSignature signature = new MethodSignature(
+                method.getName(),
+                method.getParameterTypes(),
+                method.getReturnType(),
+                isStatic
+            );
+            signatures.add(signature);
+        }
+        
+        return signatures;
+    }
+    
+    /**
+     * Check if a method signature should have @Override annotation
+     * 
+     * @param className The class containing the method
+     * @param methodName The method name
+     * @param parameterTypes The parameter types
+     * @return True if the method overrides a parent method, false otherwise
+     */
+    public static boolean shouldHaveOverrideAnnotation(String className, String methodName, String[] parameterTypes) {
+        // Without actual class loading, we'll use a heuristic:
+        // Methods like onCreate, onStart, etc. in Activity subclasses should have @Override
+        
+        if (className == null || methodName == null) {
+            return false;
+        }
+        
+        // Common Android lifecycle methods that should have @Override
+        String[] androidLifecycleMethods = {
+            "onCreate", "onStart", "onResume", "onPause", "onStop", "onDestroy",
+            "onCreateView", "onViewCreated", "onActivityCreated", "onAttach", "onDetach",
+            "onSaveInstanceState", "onRestoreInstanceState", "onActivityResult",
+            "onRequestPermissionsResult", "onCreateOptionsMenu", "onOptionsItemSelected"
+        };
+        
+        // Check if method name matches any lifecycle method
+        boolean isLifecycleMethod = false;
+        for (String lifecycleMethod : androidLifecycleMethods) {
+            if (methodName.equals(lifecycleMethod)) {
+                isLifecycleMethod = true;
+                break;
+            }
+        }
+        
+        // Check if class appears to be an Android component
+        boolean isAndroidComponent = 
+            className.endsWith("Activity") || 
+            className.endsWith("Fragment") || 
+            className.endsWith("Service") || 
+            className.endsWith("Receiver") ||
+            className.endsWith("Provider");
+        
+        return isLifecycleMethod && isAndroidComponent;
+    }
+    
+    /**
+     * Get suggested correct method signatures to fix @Override issues
+     * 
+     * @param methodName The method name with issues
+     * @param currentSignature The current incorrect signature
+     * @return List of suggested correct signatures
+     */
+    public static List<String> getSuggestedSignatures(String methodName, String currentSignature) {
+        List<String> suggestions = new ArrayList<>();
+        
+        // Without actual class analysis, provide common fixes for known methods
+        Map<String, List<String>> knownCorrectSignatures = new HashMap<>();
+        
+        // Add known Android lifecycle method signatures
+        List<String> onCreateSignatures = new ArrayList<>();
+        onCreateSignatures.add("protected void onCreate(Bundle savedInstanceState)");
+        knownCorrectSignatures.put("onCreate", onCreateSignatures);
+        
+        List<String> onStartSignatures = new ArrayList<>();
+        onStartSignatures.add("protected void onStart()");
+        knownCorrectSignatures.put("onStart", onStartSignatures);
+        
+        List<String> onResumeSignatures = new ArrayList<>();
+        onResumeSignatures.add("protected void onResume()");
+        knownCorrectSignatures.put("onResume", onResumeSignatures);
+        
+        List<String> onPauseSignatures = new ArrayList<>();
+        onPauseSignatures.add("protected void onPause()");
+        knownCorrectSignatures.put("onPause", onPauseSignatures);
+        
+        List<String> onStopSignatures = new ArrayList<>();
+        onStopSignatures.add("protected void onStop()");
+        knownCorrectSignatures.put("onStop", onStopSignatures);
+        
+        List<String> onDestroySignatures = new ArrayList<>();
+        onDestroySignatures.add("protected void onDestroy()");
+        knownCorrectSignatures.put("onDestroy", onDestroySignatures);
+        
+        // Add more signatures for common methods
+        List<String> fromSignatures = new ArrayList<>();
+        fromSignatures.add("public static YourReturnType from(Map<String, Object> data)");
+        fromSignatures.add("public static YourReturnType from(android.os.Bundle bundle)");
+        fromSignatures.add("public static YourReturnType from(android.content.Intent intent)");
+        fromSignatures.add("public static YourReturnType from(android.database.Cursor cursor)");
+        knownCorrectSignatures.put("from", fromSignatures);
+        
+        // Return suggestions for the specified method
+        if (knownCorrectSignatures.containsKey(methodName)) {
+            return knownCorrectSignatures.get(methodName);
+        }
+        
+        // If no known signatures, suggest removing @Override annotation
+        suggestions.add("Consider removing @Override annotation if this method doesn't override a superclass method");
+        
+        // Special case for 'from' methods which commonly have issues
+        if (methodName.equals("from")) {
+            suggestions.add("Static factory methods named 'from' typically don't override parent methods. Remove @Override annotation.");
+        }
+        
+        return suggestions;
+    }
+    
+    /**
+     * Suggest parameter type conversions to fix mismatches
+     * 
+     * @param sourceType The source parameter type
+     * @param targetType The target parameter type
+     * @return Conversion code or null if no conversion possible
+     */
+    public static String suggestParameterConversion(String sourceType, String targetType) {
+        // Map common type conversions
+        Map<String, Map<String, String>> conversionMap = new HashMap<>();
+        
+        // Map<String, Object> to various types
+        Map<String, String> mapConversions = new HashMap<>();
+        mapConversions.put("float[]", "DataConversionHelper.mapToFloatArray(%s)");
+        mapConversions.put("int[]", "DataConversionHelper.floatArrayToIntArray(DataConversionHelper.mapToFloatArray(%s))");
+        mapConversions.put("String", "%s.toString()");
+        mapConversions.put("Object[]", "DataConversionHelper.toObjectArray(%s)");
+        conversionMap.put("Map<String, Object>", mapConversions);
+        
+        // float[] to various types
+        Map<String, String> floatArrayConversions = new HashMap<>();
+        floatArrayConversions.put("Map<String, Object>", "DataConversionHelper.floatArrayToMap(%s, keys)");
+        floatArrayConversions.put("int[]", "DataConversionHelper.floatArrayToIntArray(%s)");
+        floatArrayConversions.put("Object", "(Object)%s");
+        conversionMap.put("float[]", floatArrayConversions);
+        
+        // Check if we have a conversion for this type pair
+        if (conversionMap.containsKey(sourceType) && conversionMap.get(sourceType).containsKey(targetType)) {
+            return conversionMap.get(sourceType).get(targetType);
+        }
+        
+        // Special cases for common type mismatches
+        if (sourceType.equals("String") && targetType.equals("CharSequence")) {
+            return "%s"; // String is already a CharSequence
+        }
+        
+        if (sourceType.equals("int") && targetType.equals("long")) {
+            return "(long)%s";
+        }
+        
+        if (sourceType.equals("float") && targetType.equals("double")) {
+            return "(double)%s";
+        }
+        
+        if (sourceType.equals("float") && targetType.equals("int")) {
+            return "Math.round(%s)";
+        }
+        
+        if (sourceType.equals("Object") && targetType.contains("<")) {
+            // Object to a generic type
+            return "(" + targetType + ")%s";
+        }
+        
+        // No known conversion
+        return null;
+    }
+    
+    /**
+     * Fix  annotation issues in static factory methods
+     * 
+     * @param classContent The content of the class file
+     * @param className The name of the class
+     * @return The updated class content
+     */
+    public static String fixFromMethodOverrideIssues(String classContent, String className) {
+        if (classContent == null || classContent.isEmpty()) {
+            return classContent;
+        }
+        
+        // Common static factory method names that shouldn't have @Override annotations
+        String[] factoryMethodNames = {
+            "from", "of", "valueOf", "getInstance", "newInstance", "create", "builder", "parse"
+        };
+        
+        String result = classContent;
+        
+        // Create patterns for all factory methods
+        for (String methodName : factoryMethodNames) {
+            // Patterns for different method visibility modifiers
+            String[] methodPatterns = {
+                "@Override\\s+[^{]*?\\bstatic\\b[^{]*?\\b" + methodName + "\\b[^{]*?\\(",
+                "@Override\\s+[^{]*?\\bpublic\\s+static\\b[^{]*?\\b" + methodName + "\\b[^{]*?\\(",
+                "@Override\\s+[^{]*?\\bprivate\\s+static\\b[^{]*?\\b" + methodName + "\\b[^{]*?\\(",
+                "@Override\\s+[^{]*?\\bprotected\\s+static\\b[^{]*?\\b" + methodName + "\\b[^{]*?\\("
+            };
+            
+            // Replace each pattern
+            for (String pattern : methodPatterns) {
+                // Find the pattern in the content
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile(pattern);
+                java.util.regex.Matcher m = p.matcher(result);
+                
+                // Replace all occurrences - remove the @Override annotation
+                while (m.find()) {
+                    String match = m.group();
+                    String replacement = match.replace("@Override", "");
+                    result = result.replace(match, replacement);
+                }
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Check if a method is a static factory method (like 'from') that shouldn't have @Override
+     * 
+     * @param methodName The method name
+     * @param isStatic Whether the method is static
+     * @return True if this is a static factory method that shouldn't have @Override
+     */
+    public static boolean isStaticFactoryMethod(String methodName, boolean isStatic) {
+        if (!isStatic) {
+            return false;
+        }
+        
+        // Common static factory method names
+        String[] factoryMethodNames = {
+            "from", "of", "valueOf", "getInstance", "newInstance", "create", "builder", "parse"
+        };
+        
+        for (String name : factoryMethodNames) {
+            if (methodName.equals(name)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+}

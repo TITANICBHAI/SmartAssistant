@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Task repeat options -->
+    <string-array name="repeat_options">
+        <item>None</item>
+        <item>Hourly</item>
+        <item>Daily</item>
+        <item>Weekly</item>
+        <item>Monthly</item>
+        <item>Yearly</item>
+    </string-array>
+    
+    <!-- Task action options -->
+    <string-array name="action_options">
+        <item>Notification</item>
+        <item>Open App</item>
+        <item>Open URL</item>
+        <item>Execute Command</item>
+        <item>AI Action</item>
+    </string-array>
+</resources>

@@ -1,0 +1,131 @@
+package android.graphics;
+
+/**
+ * Mock implementation of Android's Canvas class for development environment.
+ */
+public class Canvas {
+    private Bitmap mBitmap;
+    
+    /**
+     * Default constructor.
+     */
+    public Canvas() {
+    }
+    
+    /**
+     * Constructor with bitmap.
+     */
+    public Canvas(Bitmap bitmap) {
+        mBitmap = bitmap;
+    }
+    
+    /**
+     * Draw a line.
+     */
+    public void drawLine(float startX, float startY, float stopX, float stopY, Paint paint) {
+        // In a real implementation, this would draw a line
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Draw a rectangle.
+     */
+    public void drawRect(float left, float top, float right, float bottom, Paint paint) {
+        // In a real implementation, this would draw a rectangle
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Draw a rectangle.
+     */
+    public void drawRect(Rect r, Paint paint) {
+        drawRect(r.left, r.top, r.right, r.bottom, paint);
+    }
+    
+    /**
+     * Draw a rounded rectangle.
+     */
+    public void drawRoundRect(float left, float top, float right, float bottom, float rx, float ry, Paint paint) {
+        // In a real implementation, this would draw a rounded rectangle
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Draw a circle.
+     */
+    public void drawCircle(float cx, float cy, float radius, Paint paint) {
+        // In a real implementation, this would draw a circle
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Draw an oval.
+     */
+    public void drawOval(float left, float top, float right, float bottom, Paint paint) {
+        // In a real implementation, this would draw an oval
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Draw an arc.
+     */
+    public void drawArc(float left, float top, float right, float bottom, float startAngle, float sweepAngle, boolean useCenter, Paint paint) {
+        // In a real implementation, this would draw an arc
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Draw a bitmap.
+     */
+    public void drawBitmap(Bitmap bitmap, float left, float top, Paint paint) {
+        // In a real implementation, this would draw a bitmap
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Draw a bitmap with a matrix transformation.
+     */
+    public void drawBitmap(Bitmap bitmap, Matrix matrix, Paint paint) {
+        // In a real implementation, this would draw a transformed bitmap
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Draw text.
+     */
+    public void drawText(String text, float x, float y, Paint paint) {
+        // In a real implementation, this would draw text
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Save the current state.
+     */
+    public int save() {
+        // In a real implementation, this would save the current state
+        // For development, return 1 to indicate success
+        return 1;
+    }
+    
+    /**
+     * Restore the saved state.
+     */
+    public void restore() {
+        // In a real implementation, this would restore to the saved state
+        // For development, this is a no-op
+    }
+    
+    /**
+     * Get the width of the canvas.
+     */
+    public int getWidth() {
+        return mBitmap != null ? mBitmap.getWidth() : 0;
+    }
+    
+    /**
+     * Get the height of the canvas.
+     */
+    public int getHeight() {
+        return mBitmap != null ? mBitmap.getHeight() : 0;
+    }
+}

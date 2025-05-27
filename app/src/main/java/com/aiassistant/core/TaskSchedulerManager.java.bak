@@ -1,0 +1,534 @@
+package com.aiassistant.core;
+
+import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+
+import com.aiassistant.models.ScheduledTask;
+import com.aiassistant.models.TaskAction;
+import com.aiassistant.models.TaskPriority;
+import com.aiassistant.models.TaskSchedule;
+import com.aiassistant.models.TaskStatus;
+import com.aiassistant.models.TaskTriggerType;
+import com.aiassistant.models.TaskType;
+import com.aiassistant.services.AIAccessibilityService;
+import com.aiassistant.utils.PreferencesManager;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Task Scheduler Manager
+ * Manages scheduled tasks and their execution
+ */
+public class TaskSchedulerManager {
+    private static final String TAG = "TaskSchedulerManager";
+    
+    // Singleton instance
+    private static TaskSchedulerManager instance;
+    
+    // Context
+    private Context context;
+    
+    // Tasks
+    private List<ScheduledTask> tasks;
+    
+    // Active tasks
+    private Map<String, ScheduledTask> activeTasks;
+    
+    // Scheduler
+    private ScheduledExecutorService scheduler;
+    
+    // Handler for UI thread operations
+    private Handler mainHandler;
+    
+    // Preferences manager
+    private PreferencesManager preferencesManager;
+    
+    // Task state change listeners
+    private List<TaskStateChangeListener> stateChangeListeners;
+    
+    // Reference to accessibility service (if available)
+    private AIAccessibilityService accessibilityService;
+    
+    /**
+     * Get the singleton instance
+     */
+    public static synchronized TaskSchedulerManager getInstance(Context context) {
+        if (instance == null) {
+            instance = new TaskSchedulerManager(context.getApplicationContext());
+        }
+        return instance;
+    }
+    
+    /**
+     * Private constructor
+     */
+    private TaskSchedulerManager(Context context) {
+        this.context = context;
+        this.tasks = new CopyOnWriteArrayList<>();
+        this.activeTasks = new HashMap<>();
+        this.scheduler = Executors.newScheduledThreadPool(2);
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.preferencesManager = PreferencesManager.getInstance(context);
+        this.stateChangeListeners = new ArrayList<>();
+        
+        // Load saved tasks
+        loadTasks();
+        
+        // Start scheduler
+        startScheduler();
+    }
+    
+    /**
+     * Set accessibility service
+     */
+    public void setAccessibilityService(AIAccessibilityService service) {
+        this.accessibilityService = service;
+    }
+    
+    /**
+     * Clear accessibility service
+     */
+    public void clearAccessibilityService() {
+        this.accessibilityService = null;
+    }
+    
+    /**
+     * Add a new task
+     */
+    public void addTask(ScheduledTask task) {
+        if (task == null) return;
+        
+        // Add to list
+        tasks.add(task);
+        
+        // Save tasks
+        saveTasks();
+        
+        // Notify listeners
+        notifyTaskAdded(task);
+        
+        Log.i(TAG, "Task added: " + task.getId() + " (" + task.getName() + ")");
+    }
+    
+    /**
+     * Remove a task
+     */
+    public void removeTask(String taskId) {
+        if (taskId == null) return;
+        
+        // Find and remove
+        ScheduledTask taskToRemove = null;
+        for (ScheduledTask task : tasks) {
+            if (taskId.equals(task.getId())) {
+                taskToRemove = task;
+                break;
+            }
+        }
+        
+        if (taskToRemove != null) {
+            // Remove from active tasks if running
+            if (activeTasks.containsKey(taskId)) {
+                activeTasks.remove(taskId);
+            }
+            
+            // Remove from list
+            tasks.remove(taskToRemove);
+            
+            // Save tasks
+            saveTasks();
+            
+            // Notify listeners
+            notifyTaskRemoved(taskToRemove);
+            
+            Log.i(TAG, "Task removed: " + taskId);
+        }
+    }
+    
+    /**
+     * Get a task by ID
+     */
+    public ScheduledTask getTask(String taskId) {
+        if (taskId == null) return null;
+        
+        // Check active tasks first
+        if (activeTasks.containsKey(taskId)) {
+            return activeTasks.get(taskId);
+        }
+        
+        // Check all tasks
+        for (ScheduledTask task : tasks) {
+            if (taskId.equals(task.getId())) {
+                return task;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Get all tasks
+     */
+    public List<ScheduledTask> getAllTasks() {
+        return new ArrayList<>(tasks);
+    }
+    
+    /**
+     * Get tasks by type
+     */
+    public List<ScheduledTask> getTasksByType(TaskType type) {
+        List<ScheduledTask> result = new ArrayList<>();
+        
+        for (ScheduledTask task : tasks) {
+            if (task.getTaskType() == type) {
+                result.add(task);
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Get tasks by status
+     */
+    public List<ScheduledTask> getTasksByStatus(TaskStatus status) {
+        List<ScheduledTask> result = new ArrayList<>();
+        
+        for (ScheduledTask task : tasks) {
+            if (task.getStatus() == status) {
+                result.add(task);
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Execute a task immediately
+     */
+    public void executeTaskNow(String taskId) {
+        ScheduledTask task = getTask(taskId);
+        if (task != null) {
+            // Set status to scheduled
+            task.setStatus(TaskStatus.SCHEDULED);
+            
+            // Notify listeners
+            notifyTaskStatusChanged(task);
+            
+            // Execute task in background
+            scheduler.execute(new Runnable() {
+                @Override
+                public void run() {
+                    executeTask(task);
+                }
+            });
+        }
+    }
+    
+    /**
+     * Start the scheduler
+     */
+    private void startScheduler() {
+        // Check for due tasks every minute
+        scheduler.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                checkForDueTasks();
+            }
+        }, 1, 1, TimeUnit.MINUTES);
+    }
+    
+    /**
+     * Check for tasks that are due for execution
+     */
+    private void checkForDueTasks() {
+        Log.d(TAG, "Checking for due tasks");
+        
+        // Find due tasks
+        List<ScheduledTask> dueTasks = new ArrayList<>();
+        
+        for (ScheduledTask task : tasks) {
+            // Skip tasks that are already running or not pending/scheduled
+            if (task.getStatus() == TaskStatus.RUNNING || 
+                (task.getStatus() != TaskStatus.PENDING && task.getStatus() != TaskStatus.SCHEDULED)) {
+                continue;
+            }
+            
+            // Check if task is due
+            if (task.isDue()) {
+                dueTasks.add(task);
+            }
+        }
+        
+        // Sort by priority
+        Collections.sort(dueTasks, new Comparator<ScheduledTask>() {
+            @Override
+            public int compare(ScheduledTask t1, ScheduledTask t2) {
+                // Higher priority first
+                return t2.getPriority().ordinal() - t1.getPriority().ordinal();
+            }
+        });
+        
+        // Schedule tasks for execution
+        for (ScheduledTask task : dueTasks) {
+            // Set status to scheduled
+            task.setStatus(TaskStatus.SCHEDULED);
+            
+            // Notify listeners
+            notifyTaskStatusChanged(task);
+            
+            // Schedule for execution
+            scheduler.execute(new Runnable() {
+                @Override
+                public void run() {
+                    executeTask(task);
+                }
+            });
+        }
+    }
+    
+    /**
+     * Execute a task
+     */
+    private void executeTask(ScheduledTask task) {
+        if (task == null) return;
+        
+        String taskId = task.getId();
+        Log.i(TAG, "Executing task: " + taskId + " (" + task.getName() + ")");
+        
+        // Add to active tasks
+        activeTasks.put(taskId, task);
+        
+        // Set status to running
+        task.setStatus(ScheduledTask.TaskStatus.RUNNING);
+        task.setLastExecuted(new Date());
+        
+        // Notify listeners
+        notifyTaskStatusChanged(task);
+        
+        boolean success = true;
+        
+        try {
+            // Execute task actions based on action type
+            String actionType = task.getActionType();
+            Map<String, Object> actionParams = task.getActionParams();
+            
+            // Create action from the task's actionType and parameters
+            TaskAction action = new TaskAction(taskId, actionType);
+            action.setParameters(actionParams);
+            List<TaskAction> actions = new ArrayList<>();
+            actions.add(action);
+            
+            for (TaskAction currentAction : actions) {
+                // Check if we need to stop the task
+                if (task.getStatus() != ScheduledTask.TaskStatus.RUNNING) {
+                    break;
+                }
+                
+                // Execute action
+                boolean actionSuccess = executeAction(currentAction);
+                
+                // Update action state
+                currentAction.setExecuted(true);
+                currentAction.setSuccess(actionSuccess);
+                
+                // If action failed and we should stop on error, fail the task
+                if (!actionSuccess && success) {
+                    success = false;
+                }
+            }
+            
+            // Update task status
+            if (success) {
+                task.setStatus(ScheduledTask.TaskStatus.COMPLETED);
+                task.incrementExecutionCount();
+            } else {
+                task.setStatus(ScheduledTask.TaskStatus.FAILED);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error executing task", e);
+            task.setStatus(ScheduledTask.TaskStatus.FAILED);
+        } finally {
+            // Remove from active tasks
+            activeTasks.remove(taskId);
+            
+            // Notify listeners
+            notifyTaskStatusChanged(task);
+            
+            // Save tasks
+            saveTasks();
+        }
+    }
+    
+    /**
+     * Execute a task action
+     */
+    private boolean executeAction(TaskAction action) {
+        if (action == null) return false;
+        
+        Log.i(TAG, "Executing action: " + action.getActionId() + " (" + action.getActionType() + ")");
+        
+        boolean success = false;
+        
+        try {
+            // Check if we have an accessibility service
+            if (accessibilityService != null) {
+                // Use accessibility service for UI actions
+                success = accessibilityService.executeAction(action);
+            } else {
+                Log.w(TAG, "No accessibility service available");
+                // Could implement other ways to execute actions here
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error executing action", e);
+            success = false;
+        }
+        
+        return success;
+    }
+    
+
+    
+    /**
+     * Cancel a running task
+     */
+    public void cancelTask(String taskId) {
+        if (taskId == null) return;
+        
+        // Get task
+        ScheduledTask task = getTask(taskId);
+        if (task != null && task.getStatus() == ScheduledTask.TaskStatus.RUNNING) {
+            // Set status to cancelled
+            task.setStatus(ScheduledTask.TaskStatus.CANCELLED);
+            
+            // Notify listeners
+            notifyTaskStatusChanged(task);
+            
+            // Save tasks
+            saveTasks();
+            
+            Log.i(TAG, "Task cancelled: " + taskId);
+        }
+    }
+    
+    /**
+     * Add a task state change listener
+     */
+    public void addTaskStateChangeListener(TaskStateChangeListener listener) {
+        if (listener != null && !stateChangeListeners.contains(listener)) {
+            stateChangeListeners.add(listener);
+        }
+    }
+    
+    /**
+     * Remove a task state change listener
+     */
+    public void removeTaskStateChangeListener(TaskStateChangeListener listener) {
+        if (listener != null) {
+            stateChangeListeners.remove(listener);
+        }
+    }
+    
+    /**
+     * Notify listeners of task status change
+     */
+    private void notifyTaskStatusChanged(ScheduledTask task) {
+        for (TaskStateChangeListener listener : stateChangeListeners) {
+            listener.onTaskStatusChanged(task);
+        }
+    }
+    
+    /**
+     * Notify listeners of task added
+     */
+    private void notifyTaskAdded(ScheduledTask task) {
+        for (TaskStateChangeListener listener : stateChangeListeners) {
+            listener.onTaskAdded(task);
+        }
+    }
+    
+    /**
+     * Notify listeners of task removed
+     */
+    private void notifyTaskRemoved(ScheduledTask task) {
+        for (TaskStateChangeListener listener : stateChangeListeners) {
+            listener.onTaskRemoved(task);
+        }
+    }
+    
+    /**
+     * Save tasks to preferences
+     */
+    private void saveTasks() {
+        // In a real implementation, this would serialize tasks to JSON
+        // and save them to preferences or a database
+        Log.d(TAG, "Saving " + tasks.size() + " tasks");
+    }
+    
+    /**
+     * Load tasks from preferences
+     */
+    private void loadTasks() {
+        // In a real implementation, this would load tasks from preferences
+        // or a database and deserialize them
+        Log.d(TAG, "Loading tasks");
+    }
+    
+    /**
+     * Create a simple test task
+     */
+    public ScheduledTask createTestTask() {
+        // Create a new task
+        ScheduledTask task = new ScheduledTask("Test Task", "A test task for UI automation");
+        task.setDescription("A test task for UI automation");
+        task.setPriority(ScheduledTask.TaskPriority.MEDIUM);
+        task.setTriggerType(TaskTriggerType.SCHEDULED);
+        task.setActionType("ui_automation");
+        
+        // Schedule for immediate execution
+        task.setScheduledFor(new Date());
+        
+        return task;
+    }
+    
+    /**
+     * Clean up resources
+     */
+    public void shutdown() {
+        if (scheduler != null) {
+            scheduler.shutdown();
+        }
+    }
+    
+    /**
+     * Task State Change Listener
+     * Interface for listening to task state changes
+     */
+    public interface TaskStateChangeListener {
+        /**
+         * Called when a task status changes
+         */
+        void onTaskStatusChanged(ScheduledTask task);
+        
+        /**
+         * Called when a task is added
+         */
+        void onTaskAdded(ScheduledTask task);
+        
+        /**
+         * Called when a task is removed
+         */
+        void onTaskRemoved(ScheduledTask task);
+    }
+}

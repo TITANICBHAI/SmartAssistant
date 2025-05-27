@@ -1,0 +1,105 @@
+package com.aiassistant.utils;
+
+import android.graphics.Rect;
+import android.graphics.RectF;
+
+import models.StandardizedGameAction;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Converter for game action classes.
+ * This class helps with the transition to StandardizedGameAction.
+ */
+public class GameActionConverter {
+
+    /**
+     * Convert from PredictiveActionSystem.GameAction to StandardizedGameAction
+     * 
+     * @param action Original action from PredictiveActionSystem
+     * @return Standardized game action
+     */
+    public static StandardizedGameAction fromPredictiveGameAction(
+            com.aiassistant.ml.PredictiveActionSystem.GameAction action) {
+        
+        if (action == null) {
+            return null;
+        }
+        
+        StandardizedGameAction.ActionType actionType = 
+            StandardizedGameAction.ActionType.fromString(action.getType());
+        
+        StandardizedGameAction standardizedAction = new StandardizedGameAction(
+            action.getId(),
+            actionType,
+            action.getTargetArea()
+        );
+        
+        standardizedAction.setParameters(action.getParameters());
+        standardizedAction.setPriority(action.getPriority());
+        standardizedAction.setConfidence(action.getConfidence());
+        standardizedAction.setDescription(action.getDescription());
+        
+        return standardizedAction;
+    }
+    
+    /**
+     * Convert to PredictiveActionSystem.GameAction (for backward compatibility)
+     * 
+     * @param action Standardized game action
+     * @return Original action type
+     */
+    public static com.aiassistant.ml.PredictiveActionSystem.GameAction toPredictiveGameAction(
+            StandardizedGameAction action) {
+        
+        if (action == null) {
+            return null;
+        }
+        
+        String actionType = action.getActionType().getValue();
+        
+        return new com.aiassistant.ml.PredictiveActionSystem.GameAction(
+            action.getId(),
+            actionType,
+            action.getTargetArea(),
+            action.getParameters(),
+            action.getPriority(),
+            action.getConfidence(),
+            action.getDescription() != null ? 
+                action.getDescription() : 
+                action.generateDescription()
+        );
+    }
+    
+    /**
+     * Convert Rect to RectF
+     * 
+     * @param rect Rect to convert
+     * @return RectF version
+     */
+    public static RectF rectToRectF(Rect rect) {
+        if (rect == null) {
+            return null;
+        }
+        return new RectF(rect.left, rect.top, rect.right, rect.bottom);
+    }
+    
+    /**
+     * Convert RectF to Rect
+     * 
+     * @param rectF RectF to convert
+     * @return Rect version
+     */
+    public static Rect rectFToRect(RectF rectF) {
+        if (rectF == null) {
+            return null;
+        }
+        return new Rect(
+            Math.round(rectF.left),
+            Math.round(rectF.top),
+            Math.round(rectF.right),
+            Math.round(rectF.bottom)
+        );
+    }
+}

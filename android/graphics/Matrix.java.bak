@@ -1,0 +1,96 @@
+package android.graphics;
+
+/**
+ * Mock implementation of Android Matrix for testing environment.
+ */
+public class Matrix {
+    /**
+     * Constructor for a mock matrix
+     */
+    public Matrix() {
+        // Mock implementation
+    }
+    
+    /**
+     * Copy constructor
+     */
+    public Matrix(Matrix src) {
+        // Mock implementation
+    }
+    
+    /**
+     * Reset the matrix to identity
+     */
+    public void reset() {
+        // Mock implementation
+    }
+    
+    /**
+     * Set the matrix to translate by (dx, dy)
+     */
+    public void setTranslate(float dx, float dy) {
+        // Mock implementation
+    }
+    
+    /**
+     * Set the matrix to scale by (sx, sy)
+     */
+    public void setScale(float sx, float sy) {
+        // Mock implementation
+    }
+    
+    /**
+     * Set the matrix to rotate by degrees
+     */
+    public void setRotate(float degrees) {
+        // Mock implementation
+    }
+    
+    /**
+     * Preconcatenate the matrix with a translation
+     */
+    public boolean preTranslate(float dx, float dy) {
+        // Mock implementation
+        return true;
+    }
+    
+    /**
+     * Postconcatenate the matrix with a translation
+     */
+    public boolean postTranslate(float dx, float dy) {
+        // Mock implementation
+        return true;
+    }
+    
+    /**
+     * Preconcatenate the matrix with a scale
+     */
+    public boolean preScale(float sx, float sy) {
+        // Mock implementation
+        return true;
+    }
+    
+    /**
+     * Postconcatenate the matrix with a scale
+     */
+    public boolean postScale(float sx, float sy) {
+        // Mock implementation
+        return true;
+    }
+    
+    /**
+     * Preconcatenate the matrix with a rotation
+     */
+    public boolean preRotate(float degrees) {
+        // Mock implementation
+        return true;
+    }
+    
+    /**
+     * Postconcatenate the matrix with a rotation
+     */
+    public boolean postRotate(float degrees) {
+        // Mock implementation
+        return true;
+    }
+}

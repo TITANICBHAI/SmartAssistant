@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main_navigation"
+    app:startDestination="@id/navigation_home">
+
+    <fragment
+        android:id="@+id/navigation_home"
+        android:name="com.aiassistant.ui.fragments.HomeFragment"
+        android:label="@string/home_tab"
+        tools:layout="@layout/fragment_home" />
+
+    <fragment
+        android:id="@+id/navigation_ai"
+        android:name="com.aiassistant.ui.fragments.AIFragment"
+        android:label="@string/ai_tab"
+        tools:layout="@layout/fragment_ai" />
+
+    <fragment
+        android:id="@+id/navigation_learning"
+        android:name="com.aiassistant.ui.fragments.LearningFragment"
+        android:label="@string/learning_tab"
+        tools:layout="@layout/fragment_learning" />
+
+    <fragment
+        android:id="@+id/navigation_task_scheduler"
+        android:name="com.aiassistant.ui.fragments.TasksFragment"
+        android:label="@string/task_scheduler_tab"
+        tools:layout="@layout/fragment_task_scheduler" />
+
+    <fragment
+        android:id="@+id/navigation_settings"
+        android:name="com.aiassistant.ui.fragments.SettingsFragment"
+        android:label="@string/settings_tab"
+        tools:layout="@layout/fragment_settings" />
+</navigation>

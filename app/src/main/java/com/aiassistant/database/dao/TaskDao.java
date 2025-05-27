@@ -1,0 +1,50 @@
+package com.aiassistant.database.dao;
+
+import androidx.lifecycle.LiveData;
+import androidx.room.Dao;
+import androidx.room.Delete;
+import androidx.room.Insert;
+import androidx.room.OnConflictStrategy;
+import androidx.room.Query;
+import androidx.room.Update;
+
+import models.Task;
+
+import java.util.List;
+
+/**
+ * Data Access Object for Task entity.
+ */
+@Dao
+public interface TaskDao {
+    
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    long insertTask(Task task);
+    
+    @Update
+    void updateTask(Task task);
+    
+    @Delete
+    void deleteTask(Task task);
+    
+    @Query("SELECT * FROM tasks ORDER BY scheduledTime ASC")
+    List<Task> getAllTasks();
+    
+    @Query("SELECT * FROM tasks WHERE isActive = 1 ORDER BY scheduledTime ASC")
+    List<Task> getActiveTasks();
+    
+    @Query("SELECT * FROM tasks WHERE id = :taskId")
+    Task getTaskById(int taskId);
+    
+    @Query("SELECT * FROM tasks WHERE scheduledTime <= :currentTime AND isActive = 1 AND lastExecutedAt = 0")
+    List<Task> getDueTasks(long currentTime);
+    
+    @Query("SELECT * FROM tasks WHERE scheduledTime BETWEEN :startTime AND :endTime AND isActive = 1")
+    List<Task> getTasksInTimeRange(long startTime, long endTime);
+    
+    @Query("DELETE FROM tasks WHERE isActive = 0 AND lastExecutedAt > 0 AND repeatPattern = 'None'")
+    void deleteCompletedNonRepeatingTasks();
+    
+    @Query("SELECT * FROM tasks ORDER BY scheduledTime ASC")
+    LiveData<List<Task>> getAllTasksLiveData();
+}

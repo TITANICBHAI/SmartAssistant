@@ -1,0 +1,267 @@
+package com.aiassistant.adapters;
+
+import android.content.Context;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.cardview.widget.CardView;
+import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.aiassistant.models.ScheduledTask;
+
+import java.text.SimpleDateFormat;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * RecyclerView adapter for displaying scheduled tasks
+ */
+public class TasksAdapter extends RecyclerView.Adapter<TasksAdapter.TaskViewHolder> {
+    
+    private Context context;
+    private List<ScheduledTask> tasks;
+    private OnTaskClickListener listener;
+    private SimpleDateFormat dateFormat;
+    
+    /**
+     * Interface for task click events
+     */
+    public interface OnTaskClickListener {
+        void onTaskClick(ScheduledTask task, int position);
+        void onTaskLongClick(ScheduledTask task, int position);
+        void onTaskRunClick(ScheduledTask task, int position);
+        void onTaskStopClick(ScheduledTask task, int position);
+        void onTaskEditClick(ScheduledTask task, int position);
+    }
+    
+    /**
+     * Constructor
+     * 
+     * @param context Android context
+     * @param tasks List of tasks
+     */
+    public TasksAdapter(Context context, List<ScheduledTask> tasks) {
+        this.context = context;
+        this.tasks = tasks;
+        this.dateFormat = new SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault());
+    }
+    
+    /**
+     * Set task click listener
+     * 
+     * @param listener OnTaskClickListener
+     */
+    public void setOnTaskClickListener(OnTaskClickListener listener) {
+        this.listener = listener;
+    }
+    
+    /**
+     * View holder for task items
+     */
+    public class TaskViewHolder extends RecyclerView.ViewHolder {
+        CardView cardView;
+        TextView tvTaskName;
+        TextView tvTaskDescription;
+        TextView tvTaskStatus;
+        TextView tvScheduledDate;
+        TextView tvTriggerType;
+        ImageView ivTaskIcon;
+        ImageView ivRunAction;
+        ImageView ivStopAction;
+        ImageView ivEditAction;
+        View statusIndicator;
+        
+        /**
+         * Constructor
+         * 
+         * @param itemView Item view
+         */
+        public TaskViewHolder(@NonNull View itemView) {
+            super(itemView);
+            
+            // Replace these with actual view IDs from your layout
+            cardView = itemView.findViewById(android.R.id.content);
+            tvTaskName = itemView.findViewById(android.R.id.text1);
+            tvTaskDescription = itemView.findViewById(android.R.id.text2);
+            tvTaskStatus = itemView.findViewById(android.R.id.message);
+            tvScheduledDate = itemView.findViewById(android.R.id.summary);
+            tvTriggerType = itemView.findViewById(android.R.id.title);
+            ivTaskIcon = itemView.findViewById(android.R.id.icon);
+            ivRunAction = itemView.findViewById(android.R.id.icon1);
+            ivStopAction = itemView.findViewById(android.R.id.icon2);
+            ivEditAction = itemView.findViewById(android.R.id.button1);
+            statusIndicator = itemView.findViewById(android.R.id.background);
+            
+            // Set click listeners
+            itemView.setOnClickListener(v -> {
+                int position = getAdapterPosition();
+                if (position != RecyclerView.NO_POSITION && listener != null) {
+                    listener.onTaskClick(tasks.get(position), position);
+                }
+            });
+            
+            itemView.setOnLongClickListener(v -> {
+                int position = getAdapterPosition();
+                if (position != RecyclerView.NO_POSITION && listener != null) {
+                    listener.onTaskLongClick(tasks.get(position), position);
+                    return true;
+                }
+                return false;
+            });
+            
+            if (ivRunAction != null) {
+                ivRunAction.setOnClickListener(v -> {
+                    int position = getAdapterPosition();
+                    if (position != RecyclerView.NO_POSITION && listener != null) {
+                        listener.onTaskRunClick(tasks.get(position), position);
+                    }
+                });
+            }
+            
+            if (ivStopAction != null) {
+                ivStopAction.setOnClickListener(v -> {
+                    int position = getAdapterPosition();
+                    if (position != RecyclerView.NO_POSITION && listener != null) {
+                        listener.onTaskStopClick(tasks.get(position), position);
+                    }
+                });
+            }
+            
+            if (ivEditAction != null) {
+                ivEditAction.setOnClickListener(v -> {
+                    int position = getAdapterPosition();
+                    if (position != RecyclerView.NO_POSITION && listener != null) {
+                        listener.onTaskEditClick(tasks.get(position), position);
+                    }
+                });
+            }
+        }
+    }
+    
+    @NonNull
+    @Override
+    public TaskViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(parent.getContext())
+                .inflate(android.R.layout.simple_list_item_2, parent, false);
+        return new TaskViewHolder(view);
+    }
+    
+    @Override
+    public void onBindViewHolder(@NonNull TaskViewHolder holder, int position) {
+        ScheduledTask task = tasks.get(position);
+        
+        // Set task data to views
+        if (holder.tvTaskName != null) {
+            holder.tvTaskName.setText(task.getDisplayName());
+        }
+        
+        if (holder.tvTaskDescription != null) {
+            holder.tvTaskDescription.setText(task.getDescription());
+        }
+        
+        if (holder.tvTaskStatus != null) {
+            holder.tvTaskStatus.setText(task.getStatus().toString());
+            holder.tvTaskStatus.setTextColor(
+                    ContextCompat.getColor(context, task.getStatusColorResId()));
+        }
+        
+        if (holder.tvScheduledDate != null) {
+            if (task.getScheduledFor() != null) {
+                holder.tvScheduledDate.setText(dateFormat.format(task.getScheduledFor()));
+            } else {
+                holder.tvScheduledDate.setText("Not scheduled");
+            }
+        }
+        
+        if (holder.tvTriggerType != null) {
+            holder.tvTriggerType.setText(task.getTriggerType().getDisplayName());
+        }
+        
+        // Set status indicator color
+        if (holder.statusIndicator != null) {
+            holder.statusIndicator.setBackgroundColor(
+                    ContextCompat.getColor(context, task.getStatusColorResId()));
+        }
+        
+        // Set visibility of action buttons based on task status
+        if (holder.ivRunAction != null) {
+            boolean canRun = task.getStatus() == ScheduledTask.TaskStatus.PENDING || 
+                    task.getStatus() == ScheduledTask.TaskStatus.SCHEDULED ||
+                    task.getStatus() == ScheduledTask.TaskStatus.PAUSED;
+            holder.ivRunAction.setVisibility(canRun ? View.VISIBLE : View.GONE);
+        }
+        
+        if (holder.ivStopAction != null) {
+            boolean canStop = task.getStatus() == ScheduledTask.TaskStatus.RUNNING;
+            holder.ivStopAction.setVisibility(canStop ? View.VISIBLE : View.GONE);
+        }
+    }
+    
+    @Override
+    public int getItemCount() {
+        return tasks != null ? tasks.size() : 0;
+    }
+    
+    /**
+     * Update tasks list
+     * 
+     * @param newTasks New tasks list
+     */
+    public void updateTasks(List<ScheduledTask> newTasks) {
+        this.tasks = newTasks;
+        notifyDataSetChanged();
+    }
+    
+    /**
+     * Add a task
+     * 
+     * @param task Task to add
+     */
+    public void addTask(ScheduledTask task) {
+        tasks.add(task);
+        notifyItemInserted(tasks.size() - 1);
+    }
+    
+    /**
+     * Remove a task
+     * 
+     * @param position Position to remove
+     */
+    public void removeTask(int position) {
+        if (position >= 0 && position < tasks.size()) {
+            tasks.remove(position);
+            notifyItemRemoved(position);
+        }
+    }
+    
+    /**
+     * Update a task
+     * 
+     * @param position Position to update
+     * @param task Updated task
+     */
+    public void updateTask(int position, ScheduledTask task) {
+        if (position >= 0 && position < tasks.size()) {
+            tasks.set(position, task);
+            notifyItemChanged(position);
+        }
+    }
+    
+    /**
+     * Get task at position
+     * 
+     * @param position Position
+     * @return Task at position
+     */
+    public ScheduledTask getTask(int position) {
+        if (position >= 0 && position < tasks.size()) {
+            return tasks.get(position);
+        }
+        return null;
+    }
+}

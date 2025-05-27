@@ -1,0 +1,38 @@
+package android.content;
+
+import android.content.pm.PackageManager;
+
+/**
+ * Mock implementation of Android's Context for compatibility purposes
+ */
+public abstract class Context {
+    
+    /**
+     * Get the package name of the application
+     * 
+     * @return The package name
+     */
+    public abstract String getPackageName();
+    
+    /**
+     * Get the package manager instance
+     * 
+     * @return A PackageManager instance
+     */
+    public abstract PackageManager getPackageManager();
+    
+    /**
+     * Get a system service by name
+     * 
+     * @param name The service name
+     * @return The service object or null if not found
+     */
+    public abstract Object getSystemService(String name);
+    
+    /**
+     * Get the application info
+     * 
+     * @return ApplicationInfo for this context
+     */
+    public abstract android.content.pm.ApplicationInfo getApplicationInfo();
+}

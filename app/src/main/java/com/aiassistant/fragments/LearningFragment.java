@@ -1,0 +1,387 @@
+package com.aiassistant.fragments;
+
+import android.Manifest;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.MediaStore;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.aiassistant.R;
+import com.aiassistant.adapters.LearningSourceAdapter;
+import com.aiassistant.dialogs.ConfirmationDialog;
+import models.LearningSource;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.android.material.snackbar.Snackbar;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+/**
+ * Fragment for the Learning tab where users can add learning sources for the AI.
+ */
+public class LearningFragment extends Fragment implements LearningSourceAdapter.OnLearningSourceClickListener {
+
+    private static final int REQUEST_VIDEO_PICK = 100;
+    private static final int REQUEST_STORAGE_PERMISSION = 101;
+
+    private RecyclerView recyclerView;
+    private TextView noSourcesTextView;
+    private ProgressBar progressBar;
+    private FloatingActionButton addSourceFab;
+
+    private LearningSourceAdapter adapter;
+    private List<LearningSource> learningSources;
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        // Inflate the layout for this fragment
+        View view = inflater.inflate(R.layout.fragment_learning, container, false);
+
+        // Find views
+        recyclerView = view.findViewById(R.id.rv_learning_sources);
+        noSourcesTextView = view.findViewById(R.id.tv_no_sources);
+        progressBar = view.findViewById(R.id.progressBar);
+        addSourceFab = view.findViewById(R.id.fab_add_source);
+
+        // Set up RecyclerView
+        recyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
+        
+        // Initialize learning sources
+        learningSources = new ArrayList<>();
+        
+        // Set up adapter
+        adapter = new LearningSourceAdapter(requireContext(), learningSources);
+        adapter.setOnLearningSourceClickListener(this);
+        recyclerView.setAdapter(adapter);
+
+        // Set up add source button
+        addSourceFab.setOnClickListener(v -> showAddSourceOptions());
+
+        // Check if we have any learning sources
+        updateEmptyView();
+
+        return view;
+    }
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        
+        // Load learning sources
+        loadLearningSources();
+    }
+
+    /**
+     * Load learning sources from storage.
+     * In a real implementation, this would load from a database or file.
+     */
+    private void loadLearningSources() {
+        // For demonstration purposes, add sample learning sources
+        // In a real implementation, this would load from storage
+        learningSources.clear();
+        
+        // NOTE: In a production app, we would load real data here
+        
+        // Update the adapter
+        adapter.notifyDataSetChanged();
+        
+        // Check if we have any learning sources
+        updateEmptyView();
+    }
+
+    /**
+     * Show the empty view if there are no learning sources.
+     */
+    private void updateEmptyView() {
+        if (learningSources.isEmpty()) {
+            noSourcesTextView.setVisibility(View.VISIBLE);
+            recyclerView.setVisibility(View.GONE);
+        } else {
+            noSourcesTextView.setVisibility(View.GONE);
+            recyclerView.setVisibility(View.VISIBLE);
+        }
+    }
+
+    /**
+     * Show options for adding a learning source.
+     */
+    private void showAddSourceOptions() {
+        // Create alert dialog for source selection
+        AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
+        builder.setTitle(R.string.add_learning_source);
+        
+        // Source options
+        String[] options = {
+                getString(R.string.video_from_device),
+                getString(R.string.youtube_video),
+                getString(R.string.app_behavior),
+                getString(R.string.web_content),
+                getString(R.string.custom_content)
+        };
+        
+        builder.setItems(options, (dialog, which) -> {
+            switch (which) {
+                case 0: // Video from device
+                    checkStoragePermissionAndPickVideo();
+                    break;
+                    
+                case 1: // YouTube video
+                    showYoutubeInputDialog();
+                    break;
+                    
+                case 2: // App behavior
+                    showAppSelectionDialog();
+                    break;
+                    
+                case 3: // Web content
+                    showWebContentInputDialog();
+                    break;
+                    
+                case 4: // Custom content
+                    showCustomContentInputDialog();
+                    break;
+            }
+        });
+        
+        builder.create().show();
+    }
+
+    /**
+     * Check storage permission and open video picker if granted.
+     */
+    private void checkStoragePermissionAndPickVideo() {
+        // For Android 10+ (API 29+), we use the media picker which doesn't require storage permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            openVideoPicker();
+            return;
+        }
+        
+        // For older Android versions, we need to request storage permission
+        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            // Request permission
+            ActivityCompat.requestPermissions(requireActivity(),
+                    new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                    REQUEST_STORAGE_PERMISSION);
+        } else {
+            // Permission already granted
+            openVideoPicker();
+        }
+    }
+
+    /**
+     * Open video picker.
+     */
+    private void openVideoPicker() {
+        Intent intent = new Intent(Intent.ACTION_PICK, MediaStore.Video.Media.EXTERNAL_CONTENT_URI);
+        startActivityForResult(intent, REQUEST_VIDEO_PICK);
+    }
+
+    /**
+     * Show dialog for entering YouTube video URL.
+     */
+    private void showYoutubeInputDialog() {
+        // In a real implementation, this would show a dialog for entering a YouTube URL
+        Toast.makeText(requireContext(), "YouTube video input not implemented yet", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Show dialog for selecting an app to learn from.
+     */
+    private void showAppSelectionDialog() {
+        // In a real implementation, this would show a dialog for selecting an app
+        Toast.makeText(requireContext(), "App selection not implemented yet", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Show dialog for entering web content URL.
+     */
+    private void showWebContentInputDialog() {
+        // In a real implementation, this would show a dialog for entering a web URL
+        Toast.makeText(requireContext(), "Web content input not implemented yet", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Show dialog for entering custom content.
+     */
+    private void showCustomContentInputDialog() {
+        // In a real implementation, this would show a dialog for entering custom content
+        Toast.makeText(requireContext(), "Custom content input not implemented yet", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Handle permission request result.
+     */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        if (requestCode == REQUEST_STORAGE_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // Permission granted, open video picker
+                openVideoPicker();
+            } else {
+                // Permission denied
+                Toast.makeText(requireContext(), R.string.storage_permission_denied, Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    /**
+     * Handle activity result.
+     */
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_VIDEO_PICK && resultCode == requireActivity().RESULT_OK && data != null) {
+            // Get selected video URI
+            Uri videoUri = data.getData();
+            if (videoUri != null) {
+                // Get video information and create learning source
+                // This is a simplified implementation
+                String name = "Video Source";
+                String description = "Learn from video";
+                
+                LearningSource source = new LearningSource(name, description, 
+                        LearningSource.SourceType.VIDEO, videoUri.toString());
+                
+                // Add learning source
+                adapter.addLearningSource(source);
+                
+                // Update empty view
+                updateEmptyView();
+                
+                // Show feedback
+                Snackbar.make(requireView(), R.string.learning_source_added, Snackbar.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    /**
+     * Handle learning source click.
+     */
+    @Override
+    public void onLearningSourceClick(LearningSource source) {
+        // Show learning source details
+        // In a real implementation, this would open a details screen or start learning
+        Toast.makeText(requireContext(), "Clicked on: " + source.getName(), Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Handle learning source long click.
+     */
+    @Override
+    public void onLearningSourceLongClick(LearningSource source, int position) {
+        // Show options for the learning source
+        showLearningSourceOptions(source, position);
+    }
+
+    /**
+     * Show options for a learning source.
+     */
+    private void showLearningSourceOptions(LearningSource source, int position) {
+        // Create alert dialog for source options
+        AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
+        builder.setTitle(source.getName());
+        
+        // Options
+        String[] options = {
+                getString(R.string.start_learning),
+                getString(R.string.pause_learning),
+                getString(R.string.edit_source),
+                getString(R.string.delete_source)
+        };
+        
+        builder.setItems(options, (dialog, which) -> {
+            switch (which) {
+                case 0: // Start learning
+                    startLearningFromSource(source);
+                    break;
+                    
+                case 1: // Pause learning
+                    pauseLearningFromSource(source);
+                    break;
+                    
+                case 2: // Edit source
+                    editLearningSource(source, position);
+                    break;
+                    
+                case 3: // Delete source
+                    confirmDeleteLearningSource(source, position);
+                    break;
+            }
+        });
+        
+        builder.create().show();
+    }
+
+    /**
+     * Start learning from a source.
+     */
+    private void startLearningFromSource(LearningSource source) {
+        // In a real implementation, this would start the learning process
+        Toast.makeText(requireContext(), "Started learning from: " + source.getName(), Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Pause learning from a source.
+     */
+    private void pauseLearningFromSource(LearningSource source) {
+        // In a real implementation, this would pause the learning process
+        Toast.makeText(requireContext(), "Paused learning from: " + source.getName(), Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Edit a learning source.
+     */
+    private void editLearningSource(LearningSource source, int position) {
+        // In a real implementation, this would open an edit dialog
+        Toast.makeText(requireContext(), "Edit not implemented yet", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Confirm deletion of a learning source.
+     */
+    private void confirmDeleteLearningSource(LearningSource source, int position) {
+        // Create and show a confirmation dialog
+        ConfirmationDialog dialog = new ConfirmationDialog(
+                getString(R.string.delete_source),
+                getString(R.string.delete_source_confirm, source.getName()),
+                getString(R.string.delete),
+                getString(R.string.cancel),
+                () -> deleteLearningSource(position));
+        
+        dialog.show(getChildFragmentManager(), "DeleteSourceConfirmation");
+    }
+
+    /**
+     * Delete a learning source.
+     */
+    private void deleteLearningSource(int position) {
+        // Remove from adapter
+        adapter.removeLearningSource(position);
+        
+        // Update empty view
+        updateEmptyView();
+        
+        // Show feedback
+        Snackbar.make(requireView(), R.string.learning_source_deleted, Snackbar.LENGTH_SHORT).show();
+    }
+}

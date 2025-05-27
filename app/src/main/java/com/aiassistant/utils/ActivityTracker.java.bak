@@ -1,0 +1,128 @@
+package com.aiassistant.utils;
+
+import android.content.Context;
+import android.util.Log;
+
+import com.aiassistant.database.AppDatabase;
+import com.aiassistant.models.LearnedData;
+import com.aiassistant.services.LearningService;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Utility class for tracking user activity and interaction patterns.
+ * This helps the AI learn from user behavior.
+ */
+public class ActivityTracker {
+    
+    private static final String TAG = "ActivityTracker";
+    private static final int MAX_STORED_INTERACTIONS = 20;
+    private static final int MIN_INTERACTIONS_FOR_PATTERN = 3;
+    
+    private final Context context;
+    private final ExecutorService executor;
+    private final Map<String, List<InteractionRecord>> appInteractions;
+    private final AppDetector appDetector;
+    
+    public ActivityTracker(Context context) {
+        this.context = context.getApplicationContext();
+        this.executor = Executors.newSingleThreadExecutor();
+        this.appInteractions = new HashMap<>();
+        this.appDetector = new AppDetector(context);
+    }
+    
+    /**
+     * Record a user interaction with an app
+     */
+    public void recordInteraction(String packageName, String interactionType, String target) {
+        if (packageName == null || packageName.isEmpty()) {
+            return;
+        }
+        
+        executor.execute(() -> {
+            long timestamp = System.currentTimeMillis();
+            InteractionRecord record = new InteractionRecord(timestamp, interactionType, target);
+            
+            // Get or create the interaction list for this app
+            List<InteractionRecord> interactions = appInteractions.get(packageName);
+            if (interactions == null) {
+                interactions = new ArrayList<>();
+                appInteractions.put(packageName, interactions);
+            }
+            
+            // Add the new interaction
+            interactions.add(record);
+            
+            // Limit the size of the list
+            if (interactions.size() > MAX_STORED_INTERACTIONS) {
+                interactions.remove(0);
+            }
+            
+            // Check if we have enough interactions to detect a pattern
+            if (interactions.size() >= MIN_INTERACTIONS_FOR_PATTERN) {
+                detectPattern(packageName, interactions);
+            }
+        });
+    }
+    
+    /**
+     * Try to detect a pattern in user interactions
+     */
+    private void detectPattern(String packageName, List<InteractionRecord> interactions) {
+        // Simple pattern detection: look for repeated sequences
+        try {
+            // Get last few interactions to analyze
+            int patternSize = Math.min(10, interactions.size());
+            List<String> interactionStrings = new ArrayList<>();
+            
+            for (int i = interactions.size() - patternSize; i < interactions.size(); i++) {
+                InteractionRecord record = interactions.get(i);
+                interactionStrings.add(record.interactionType);
+            }
+            
+            // Submit to LearningService to learn from these interactions
+            LearningService learningService = LearningService.getInstance(context);
+            learningService.learnFromInteractions(packageName, interactionStrings);
+        } catch (Exception e) {
+            Log.e(TAG, "Error detecting pattern", e);
+        }
+    }
+    
+    /**
+     * Clear tracked interactions for a specific app
+     */
+    public void clearAppInteractions(String packageName) {
+        executor.execute(() -> {
+            appInteractions.remove(packageName);
+        });
+    }
+    
+    /**
+     * Clear all tracked interactions
+     */
+    public void clearAllInteractions() {
+        executor.execute(() -> {
+            appInteractions.clear();
+        });
+    }
+    
+    /**
+     * Inner class to represent a single interaction record
+     */
+    private static class InteractionRecord {
+        long timestamp;
+        String interactionType;
+        String target;
+        
+        InteractionRecord(long timestamp, String interactionType, String target) {
+            this.timestamp = timestamp;
+            this.interactionType = interactionType;
+            this.target = target;
+        }
+    }
+}

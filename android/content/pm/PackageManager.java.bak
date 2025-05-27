@@ -1,0 +1,41 @@
+package android.content.pm;
+
+/**
+ * Mock implementation of Android's PackageManager for compatibility purposes
+ */
+public abstract class PackageManager {
+    
+    /**
+     * Retrieve information about a particular application
+     *
+     * @param packageName The name of the package to find
+     * @param flags Additional flags to modify the data returned
+     * @return ApplicationInfo object containing information about the package
+     * @throws NameNotFoundException if package with that name cannot be found
+     */
+    public abstract ApplicationInfo getApplicationInfo(String packageName, int flags) 
+        throws NameNotFoundException;
+    
+    /**
+     * Exception thrown when a package is not found
+     */
+    public static class NameNotFoundException extends Exception {
+        private static final long serialVersionUID = 1L;
+        
+        /**
+         * Default constructor
+         */
+        public NameNotFoundException() {
+            super();
+        }
+        
+        /**
+         * Constructor with error message
+         *
+         * @param message The error message
+         */
+        public NameNotFoundException(String message) {
+            super(message);
+        }
+    }
+}

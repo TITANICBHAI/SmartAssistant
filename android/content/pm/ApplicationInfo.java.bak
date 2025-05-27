@@ -1,0 +1,42 @@
+package android.content.pm;
+
+/**
+ * Mock implementation of Android's ApplicationInfo for compatibility purposes
+ */
+public class ApplicationInfo {
+    /**
+     * The name of the package that this application is loaded into.
+     */
+    public String packageName;
+    
+    /**
+     * Public name of this application.
+     */
+    public String name;
+    
+    /**
+     * Default constructor
+     */
+    public ApplicationInfo() {
+        this.packageName = "";
+        this.name = "";
+    }
+    
+    /**
+     * Constructor with package name
+     * 
+     * @param packageName The package name
+     */
+    public ApplicationInfo(String packageName) {
+        this.packageName = packageName;
+        this.name = packageName;
+    }
+    
+    /**
+     * Returns the package name
+     */
+    @Override
+    public String toString() {
+        return packageName;
+    }
+}

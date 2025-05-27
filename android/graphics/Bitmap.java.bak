@@ -1,0 +1,119 @@
+package android.graphics;
+
+/**
+ * Mock implementation of Android's Bitmap for compatibility purposes
+ */
+public class Bitmap {
+    private int width;
+    private int height;
+    private Config config;
+    
+    /**
+     * Private constructor
+     */
+    private Bitmap(int width, int height, Config config) {
+        this.width = width;
+        this.height = height;
+        this.config = config;
+    }
+    
+    /**
+     * Create a bitmap with the specified width, height, and config
+     * 
+     * @param width Width of the bitmap
+     * @param height Height of the bitmap
+     * @param config Bitmap configuration
+     * @return A new bitmap
+     */
+    public static Bitmap createBitmap(int width, int height, Config config) {
+        return new Bitmap(width, height, config);
+    }
+    
+    /**
+     * Create a bitmap with the specified data and configuration
+     * 
+     * @param pixels Pixel data
+     * @param offset Offset in the array
+     * @param stride Stride in pixels
+     * @param width Width of the bitmap
+     * @param height Height of the bitmap
+     * @param config Bitmap configuration
+     * @return A new bitmap
+     */
+    public static Bitmap createBitmap(int[] pixels, int offset, int stride, int width, int height, Config config) {
+        return new Bitmap(width, height, config);
+    }
+    
+    /**
+     * Get the bitmap width
+     * 
+     * @return Width in pixels
+     */
+    public int getWidth() {
+        return width;
+    }
+    
+    /**
+     * Get the bitmap height
+     * 
+     * @return Height in pixels
+     */
+    public int getHeight() {
+        return height;
+    }
+    
+    /**
+     * Get the bitmap config
+     * 
+     * @return The configuration
+     */
+    public Config getConfig() {
+        return config;
+    }
+    
+    /**
+     * Bitmap configuration
+     */
+    public enum Config {
+        /**
+         * Each pixel is stored as a single translucency (alpha) channel.
+         */
+        ALPHA_8,
+        
+        /**
+         * Each pixel is stored on 2 bytes, with red and blue having 5 bits each, and green having 6 bits.
+         */
+        RGB_565,
+        
+        /**
+         * Each pixel is stored on 4 bytes.
+         */
+        ARGB_8888,
+        
+        /**
+         * Each pixel is stored on 8 bytes. This is a format optimized for GPU rendering.
+         */
+        RGBA_F16,
+        
+        /**
+         * Special configuration, when bitmap is stored in a renderer-specific format.
+         */
+        HARDWARE
+    }
+    
+    /**
+     * Check if the bitmap is recycled
+     * 
+     * @return True if recycled
+     */
+    public boolean isRecycled() {
+        return false;
+    }
+    
+    /**
+     * Recycle the bitmap
+     */
+    public void recycle() {
+        // No implementation needed for mock
+    }
+}

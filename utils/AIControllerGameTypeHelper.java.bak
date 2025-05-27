@@ -1,0 +1,67 @@
+package utils;
+
+import com.aiassistant.models.GameType;
+import android.util.Log;
+
+/**
+ * Helper class for converting between different GameType implementations.
+ */
+public class AIControllerGameTypeHelper {
+    private static final String TAG = "AIControllerGameTypeHelper";
+    
+    /**
+     * Convert from model GameType to AIController GameType
+     * @param gameType The model GameType
+     * @return The AIController GameType or null if conversion failed
+     */
+    public static utils.GameType fromModelGameType(GameType gameType) {
+        if (gameType == null) {
+            return null;
+        }
+        
+        try {
+            String gameTypeName = gameType.name();
+            return utils.GameType.valueOf(gameTypeName);
+        } catch (Exception e) {
+            Log.e(TAG, "Error converting model GameType to AIController GameType: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Convert from AIController GameType to model GameType
+     * @param gameType The AIController GameType
+     * @return The model GameType or null if conversion failed
+     */
+    public static GameType toModelGameType(utils.GameType gameType) {
+        if (gameType == null) {
+            return null;
+        }
+        
+        try {
+            String gameTypeName = gameType.name();
+            return GameType.valueOf(gameTypeName);
+        } catch (Exception e) {
+            Log.e(TAG, "Error converting AIController GameType to model GameType: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Convert from GameType name to AIController GameType
+     * @param gameTypeName The GameType name
+     * @return The AIController GameType or null if conversion failed
+     */
+    public static utils.GameType fromString(String gameTypeName) {
+        if (gameTypeName == null || gameTypeName.isEmpty()) {
+            return null;
+        }
+        
+        try {
+            return utils.GameType.valueOf(gameTypeName.toUpperCase());
+        } catch (Exception e) {
+            Log.e(TAG, "Error converting string to AIController GameType: " + e.getMessage());
+            return null;
+        }
+    }
+}

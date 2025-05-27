@@ -1,0 +1,326 @@
+package com.aiassistant.services;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Binder;
+import android.os.Build;
+import android.os.IBinder;
+import android.os.PowerManager;
+import android.util.Log;
+
+import androidx.annotation.Nullable;
+import androidx.core.app.NotificationCompat;
+import androidx.preference.PreferenceManager;
+
+import com.aiassistant.MainActivity;
+import com.aiassistant.R;
+import utils.PermissionManager;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Background service for the AI Assistant
+ * Handles continuous AI processing and learning in the background
+ */
+public class AIBackgroundService extends Service {
+    private static final String TAG = "AIBackgroundService";
+    private static final String CHANNEL_ID = "ai_assistant_channel";
+    private static final int FOREGROUND_NOTIFICATION_ID = 1001;
+    
+    private final IBinder binder = new LocalBinder();
+    private ExecutorService executorService;
+    private PowerManager.WakeLock wakeLock;
+    private AtomicBoolean isRunning = new AtomicBoolean(false);
+    private String currentAIMode = "balanced";
+    private boolean lowPowerMode = false;
+    private boolean privacyMode = false;
+    
+    // Handler for various AI components
+    // These would be initialized in a real implementation
+    private Object learningSystem;
+    private Object taskScheduler;
+    private Object aiController;
+    
+    /**
+     * Class for clients to access the service
+     */
+    public class LocalBinder extends Binder {
+        public AIBackgroundService getService() {
+            return AIBackgroundService.this;
+        }
+    }
+    
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        Log.d(TAG, "Service created");
+        
+        // Create notification channel for foreground service
+        createNotificationChannel();
+        
+        // Initialize executor service for background tasks
+        executorService = Executors.newFixedThreadPool(2);
+        
+        // Acquire wake lock to keep CPU running
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                "AIAssistant:AIBackgroundService");
+        
+        // Load preferences
+        loadPreferences();
+        
+        // Initialize AI components
+        initializeAIComponents();
+    }
+    
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d(TAG, "Service started");
+        
+        if (intent != null && intent.getAction() != null) {
+            handleCommandAction(intent);
+        } else {
+            // Start the service in foreground with notification
+            startForeground(FOREGROUND_NOTIFICATION_ID, createNotification());
+            
+            // Start AI processing if not already running
+            if (!isRunning.getAndSet(true)) {
+                startAIProcessing();
+            }
+        }
+        
+        // Return sticky so the service restarts if killed
+        return START_STICKY;
+    }
+    
+    @Nullable
+    @Override
+    public IBinder onBind(Intent intent) {
+        return binder;
+    }
+    
+    @Override
+    public void onDestroy() {
+        Log.d(TAG, "Service destroyed");
+        
+        // Stop AI processing
+        isRunning.set(false);
+        
+        // Release wake lock
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        
+        // Shutdown executor service
+        if (executorService != null) {
+            executorService.shutdown();
+        }
+        
+        // Clean up AI components
+        cleanupAIComponents();
+        
+        super.onDestroy();
+    }
+    
+    /**
+     * Handle command actions sent to the service
+     */
+    private void handleCommandAction(Intent intent) {
+        String action = intent.getAction();
+        
+        switch (action) {
+            case "UPDATE_AI_MODE":
+                String newMode = intent.getStringExtra("mode");
+                if (newMode != null) {
+                    updateAIMode(newMode);
+                } else {
+                    // If no mode specified, reload from preferences
+                    loadPreferences();
+                }
+                break;
+                
+            case "START_TASK":
+                String taskId = intent.getStringExtra("task_id");
+                if (taskId != null) {
+                    executeTask(taskId);
+                }
+                break;
+                
+            case "STOP_TASK":
+                String stopTaskId = intent.getStringExtra("task_id");
+                if (stopTaskId != null) {
+                    stopTask(stopTaskId);
+                }
+                break;
+                
+            case "UPDATE_SETTINGS":
+                loadPreferences();
+                break;
+                
+            case "STOP_SERVICE":
+                stopSelf();
+                break;
+        }
+    }
+    
+    /**
+     * Create notification channel for Android O and above
+     */
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "AI Assistant Service",
+                    NotificationManager.IMPORTANCE_LOW);
+            
+            channel.setDescription("Background AI processing");
+            channel.enableVibration(false);
+            channel.setSound(null, null);
+            
+            NotificationManager notificationManager = getSystemService(NotificationManager.class);
+            notificationManager.createNotificationChannel(channel);
+        }
+    }
+    
+    /**
+     * Create foreground service notification
+     */
+    private Notification createNotification() {
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
+        
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText("AI Assistant is running")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .build();
+    }
+    
+    /**
+     * Load user preferences
+     */
+    private void loadPreferences() {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        
+        currentAIMode = prefs.getString("ai_mode", "balanced");
+        lowPowerMode = prefs.getBoolean("low_power_mode", false);
+        privacyMode = prefs.getBoolean("privacy_mode", false);
+        
+        Log.d(TAG, "Loaded preferences: mode=" + currentAIMode +
+                ", lowPower=" + lowPowerMode +
+                ", privacy=" + privacyMode);
+    }
+    
+    /**
+     * Initialize AI components
+     */
+    private void initializeAIComponents() {
+        // In a real implementation, initialize learning system, controllers, etc.
+        Log.d(TAG, "Initializing AI components");
+        
+        // Acquire wake lock if needed
+        if (!wakeLock.isHeld()) {
+            wakeLock.acquire();
+        }
+    }
+    
+    /**
+     * Clean up AI components
+     */
+    private void cleanupAIComponents() {
+        // In a real implementation, clean up learning system, controllers, etc.
+        Log.d(TAG, "Cleaning up AI components");
+    }
+    
+    /**
+     * Start AI processing in the background
+     */
+    private void startAIProcessing() {
+        Log.d(TAG, "Starting AI processing in mode: " + currentAIMode);
+        
+        executorService.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // In a real implementation, this would be a continuous processing loop
+                    while (isRunning.get()) {
+                        // Process AI tasks, check for user patterns, etc.
+                        
+                        // Sleep to reduce resource usage
+                        Thread.sleep(lowPowerMode ? 5000 : 1000);
+                    }
+                } catch (InterruptedException e) {
+                    Log.e(TAG, "AI processing interrupted", e);
+                    Thread.currentThread().interrupt();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error in AI processing", e);
+                }
+            }
+        });
+    }
+    
+    /**
+     * Update AI operating mode
+     */
+    private void updateAIMode(String mode) {
+        Log.d(TAG, "Updating AI mode to: " + mode);
+        currentAIMode = mode;
+        
+        // In a real implementation, notify AI components of mode change
+    }
+    
+    /**
+     * Execute a scheduled task
+     */
+    private void executeTask(String taskId) {
+        Log.d(TAG, "Executing task: " + taskId);
+        
+        // In a real implementation, retrieve task definition and execute
+    }
+    
+    /**
+     * Stop a running task
+     */
+    private void stopTask(String taskId) {
+        Log.d(TAG, "Stopping task: " + taskId);
+        
+        // In a real implementation, find and stop the running task
+    }
+    
+    /**
+     * Public API for binding clients to update service settings
+     */
+    public void setLowPowerMode(boolean enabled) {
+        lowPowerMode = enabled;
+        Log.d(TAG, "Low power mode set to: " + enabled);
+    }
+    
+    /**
+     * Public API for binding clients to update privacy settings
+     */
+    public void setPrivacyMode(boolean enabled) {
+        privacyMode = enabled;
+        Log.d(TAG, "Privacy mode set to: " + enabled);
+    }
+    
+    /**
+     * Check if service has all required permissions
+     */
+    public boolean hasRequiredPermissions() {
+        PermissionManager permissionManager = new PermissionManager(this);
+        return permissionManager.hasAccessibilityPermission() &&
+               permissionManager.hasOverlayPermission() &&
+               permissionManager.hasUsageStatsPermission();
+    }
+}

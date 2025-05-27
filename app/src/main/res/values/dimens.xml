@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Card dimensions -->
+    <dimen name="card_stroke_width">2dp</dimen>
+    <dimen name="card_stroke_width_selected">4dp</dimen>
+    
+    <!-- Text dimensions -->
+    <dimen name="text_size_header">20sp</dimen>
+    <dimen name="text_size_subheader">18sp</dimen>
+    <dimen name="text_size_body">16sp</dimen>
+    <dimen name="text_size_caption">14sp</dimen>
+    <dimen name="text_size_small">12sp</dimen>
+    
+    <!-- Margin and padding dimensions -->
+    <dimen name="margin_small">4dp</dimen>
+    <dimen name="margin_medium">8dp</dimen>
+    <dimen name="margin_large">16dp</dimen>
+    <dimen name="margin_xlarge">24dp</dimen>
+    <dimen name="margin_xxlarge">32dp</dimen>
+    
+    <dimen name="padding_small">4dp</dimen>
+    <dimen name="padding_medium">8dp</dimen>
+    <dimen name="padding_large">16dp</dimen>
+    <dimen name="padding_xlarge">24dp</dimen>
+    
+    <!-- Icon dimensions -->
+    <dimen name="icon_size_small">24dp</dimen>
+    <dimen name="icon_size_medium">36dp</dimen>
+    <dimen name="icon_size_large">48dp</dimen>
+    
+    <!-- Radius dimensions -->
+    <dimen name="corner_radius">8dp</dimen>
+    <dimen name="elevation_normal">2dp</dimen>
+    <dimen name="elevation_raised">4dp</dimen>
+</resources>

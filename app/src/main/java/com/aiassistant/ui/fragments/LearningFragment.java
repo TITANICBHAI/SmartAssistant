@@ -1,0 +1,325 @@
+package com.aiassistant.ui.fragments;
+
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.fragment.app.Fragment;
+import androidx.viewpager2.widget.ViewPager2;
+
+import com.aiassistant.R;
+import com.aiassistant.adapters.LearningPagerAdapter;
+import com.aiassistant.core.AIController;
+import models.AIState;
+import models.LearningSource;
+import com.google.android.material.tabs.TabLayout;
+import com.google.android.material.tabs.TabLayoutMediator;
+
+/**
+ * Learning Fragment
+ * Controls the AI learning settings and options
+ */
+public class LearningFragment extends Fragment {
+    private TabLayout tabLayoutLearning;
+    private ViewPager2 viewPagerLearning;
+    
+    // Video learning tab components
+    private TextView textSelectedVideo;
+    private Button buttonSelectVideo;
+    private CheckBox checkboxExtractText;
+    private CheckBox checkboxAnalyzeActions;
+    private CheckBox checkboxIdentifyPatterns;
+    private CheckBox checkboxCreateModel;
+    private Button buttonStartLearning;
+    private ProgressBar progressBarLearning;
+    private TextView textLearningStatus;
+    private Button buttonSaveLearning;
+    
+    private AIController aiController;
+    private Uri selectedVideoUri;
+    private boolean isLearningInProgress = false;
+    private int learningProgress = 0;
+    
+    @Nullable
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+        return inflater.inflate(R.layout.fragment_learning, container, false);
+    }
+    
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        
+        // Initialize AIController
+        aiController = AIController.getInstance(requireContext());
+        
+        // Initialize views
+        initializeViews(view);
+        
+        // Setup ViewPager
+        //setupViewPager();
+        
+        // Set up button listeners
+        setupButtonListeners();
+        
+        // Update UI with current learning state
+        updateLearningState();
+    }
+    
+    private void initializeViews(View view) {
+        tabLayoutLearning = view.findViewById(R.id.tab_layout_learning);
+        viewPagerLearning = view.findViewById(R.id.view_pager_learning);
+        
+        // Video learning tab components
+        textSelectedVideo = view.findViewById(R.id.text_selected_video);
+        buttonSelectVideo = view.findViewById(R.id.button_select_video);
+        checkboxExtractText = view.findViewById(R.id.checkbox_extract_text);
+        checkboxAnalyzeActions = view.findViewById(R.id.checkbox_analyze_actions);
+        checkboxIdentifyPatterns = view.findViewById(R.id.checkbox_identify_patterns);
+        checkboxCreateModel = view.findViewById(R.id.checkbox_create_model);
+        buttonStartLearning = view.findViewById(R.id.button_start_learning);
+        progressBarLearning = view.findViewById(R.id.progress_bar_learning);
+        textLearningStatus = view.findViewById(R.id.text_learning_status);
+        buttonSaveLearning = view.findViewById(R.id.button_save_learning);
+    }
+    
+    private void setupViewPager() {
+        LearningPagerAdapter adapter = new LearningPagerAdapter(requireActivity());
+        viewPagerLearning.setAdapter(adapter);
+        
+        new TabLayoutMediator(tabLayoutLearning, viewPagerLearning, (tab, position) -> {
+            switch (position) {
+                case 0:
+                    tab.setText(R.string.learn_from_video);
+                    break;
+                case 1:
+                    tab.setText(R.string.learn_from_actions);
+                    break;
+                case 2:
+                    tab.setText(R.string.learn_from_games);
+                    break;
+            }
+        }).attach();
+    }
+    
+    private void setupButtonListeners() {
+        // Select video button
+        buttonSelectVideo.setOnClickListener(v -> {
+            if (getActivity() != null) {
+                ((com.aiassistant.ui.MainActivity) getActivity()).openVideoPicker();
+            }
+        });
+        
+        // Start learning button
+        buttonStartLearning.setOnClickListener(v -> {
+            if (selectedVideoUri != null) {
+                toggleLearning();
+            } else {
+                Toast.makeText(requireContext(), "Please select a video first", Toast.LENGTH_SHORT).show();
+            }
+        });
+        
+        // Save learning button
+        buttonSaveLearning.setOnClickListener(v -> {
+            saveLearningData();
+        });
+    }
+    
+    /**
+     * Process a selected video URI
+     * This is called from MainActivity when a video is selected
+     */
+    public void processSelectedVideo(Uri videoUri) {
+        this.selectedVideoUri = videoUri;
+        
+        // Update UI
+        if (videoUri != null) {
+            // Get filename from URI
+            String filename = getFileNameFromUri(videoUri);
+            textSelectedVideo.setText(filename);
+            buttonStartLearning.setEnabled(true);
+        } else {
+            textSelectedVideo.setText("No video selected");
+            buttonStartLearning.setEnabled(false);
+        }
+    }
+    
+    private String getFileNameFromUri(Uri uri) {
+        String result = uri.getLastPathSegment();
+        if (result != null && result.contains("/")) {
+            result = result.substring(result.lastIndexOf("/") + 1);
+        }
+        return result != null ? result : "Unknown file";
+    }
+    
+    private void toggleLearning() {
+        if (isLearningInProgress) {
+            // Stop learning
+            isLearningInProgress = false;
+            updateLearningUI();
+            
+            // Update AI state
+            AIState aiState = aiController.getAIState();
+            aiState.setLearningActive(false);
+            aiState.setCurrentLearningSource(null);
+            
+            textLearningStatus.setText("Learning stopped");
+            buttonStartLearning.setText("Start Learning");
+            buttonSaveLearning.setEnabled(true);
+        } else {
+            // Start learning
+            isLearningInProgress = true;
+            learningProgress = 0;
+            updateLearningUI();
+            
+            // Update AI state
+            AIState aiState = aiController.getAIState();
+            aiState.setLearningActive(true);
+            aiState.setCurrentLearningSource(LearningSource.VIDEO);
+            aiState.setLearningProgress(0);
+            
+            textLearningStatus.setText("Learning in progress...");
+            buttonStartLearning.setText("Stop Learning");
+            
+            // Start simulated learning process
+            simulateLearningProcess();
+        }
+    }
+    
+    private void simulateLearningProcess() {
+        // In a real implementation, this would initiate actual learning on the video
+        // For now, we'll just simulate progress updates
+        
+        new Thread(() -> {
+            try {
+                while (isLearningInProgress && learningProgress < 100) {
+                    // Simulate learning by incrementing progress
+                    Thread.sleep(500);
+                    learningProgress += 5;
+                    
+                    // Update UI on main thread
+                    if (getActivity() != null) {
+                        getActivity().runOnUiThread(() -> {
+                            updateLearningProgress(learningProgress);
+                        });
+                    }
+                    
+                    // Check if we've completed
+                    if (learningProgress >= 100) {
+                        if (getActivity() != null) {
+                            getActivity().runOnUiThread(() -> {
+                                isLearningInProgress = false;
+                                updateLearningUI();
+                                textLearningStatus.setText("Learning completed successfully");
+                                buttonStartLearning.setText("Start Learning");
+                                buttonSaveLearning.setEnabled(true);
+                            });
+                        }
+                        break;
+                    }
+                }
+            } catch (InterruptedException e) {
+                // Handle interruption
+                if (getActivity() != null) {
+                    getActivity().runOnUiThread(() -> {
+                        isLearningInProgress = false;
+                        updateLearningUI();
+                        textLearningStatus.setText("Learning interrupted");
+                        buttonStartLearning.setText("Start Learning");
+                    });
+                }
+            }
+        }).start();
+    }
+    
+    private void updateLearningProgress(int progress) {
+        progressBarLearning.setProgress(progress);
+        
+        // Update AI state
+        AIState aiState = aiController.getAIState();
+        aiState.setLearningProgress(progress / 100.0f);
+    }
+    
+    private void updateLearningUI() {
+        buttonSelectVideo.setEnabled(!isLearningInProgress);
+        checkboxExtractText.setEnabled(!isLearningInProgress);
+        checkboxAnalyzeActions.setEnabled(!isLearningInProgress);
+        checkboxIdentifyPatterns.setEnabled(!isLearningInProgress);
+        checkboxCreateModel.setEnabled(!isLearningInProgress);
+        buttonSaveLearning.setEnabled(!isLearningInProgress && learningProgress >= 100);
+    }
+    
+    private void saveLearningData() {
+        // In a real implementation, this would save the learned model
+        // For now, we'll just show a toast
+        
+        Toast.makeText(requireContext(), 
+                "Learning data saved successfully", 
+                Toast.LENGTH_SHORT).show();
+        
+        // Reset UI
+        selectedVideoUri = null;
+        learningProgress = 0;
+        isLearningInProgress = false;
+        
+        textSelectedVideo.setText("No video selected");
+        progressBarLearning.setProgress(0);
+        textLearningStatus.setText("Ready to start learning");
+        buttonStartLearning.setEnabled(false);
+        buttonSaveLearning.setEnabled(false);
+        
+        // Update AI state
+        AIState aiState = aiController.getAIState();
+        aiState.setLearningActive(false);
+        aiState.setCurrentLearningSource(null);
+        aiState.setLearningProgress(0);
+    }
+    
+    /**
+     * Update the UI to reflect the current learning state
+     * This is called when the fragment becomes visible
+     */
+    private void updateLearningState() {
+        if (aiController == null || !isAdded()) {
+            return;
+        }
+        
+        AIState aiState = aiController.getAIState();
+        
+        // Check if learning is already active
+        if (aiState.isLearningActive() && aiState.getCurrentLearningSource() == LearningSource.VIDEO) {
+            isLearningInProgress = true;
+            learningProgress = (int)(aiState.getLearningProgress() * 100);
+            
+            updateLearningUI();
+            updateLearningProgress(learningProgress);
+            
+            textLearningStatus.setText("Learning in progress...");
+            buttonStartLearning.setText("Stop Learning");
+        } else {
+            isLearningInProgress = false;
+            learningProgress = 0;
+            
+            updateLearningUI();
+            
+            textLearningStatus.setText("Ready to start learning");
+            buttonStartLearning.setText("Start Learning");
+        }
+    }
+    
+    @Override
+    public void onResume() {
+        super.onResume();
+        updateLearningState();
+    }
+}

@@ -1,0 +1,186 @@
+package com.aiassistant.models;
+
+import android.graphics.Rect;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+/**
+ * UI Element class used by models system
+ * This implementation is compatible with the database and model systems.
+ */
+public class UIElement {
+    private final String id;
+    private final UIElementType type;
+    private final Rect bounds;
+    private final String text;
+    private final String contentDescription;
+    private final boolean clickable;
+    private final boolean enabled;
+    
+    /**
+     * Create a new UIElement
+     * 
+     * @param id Unique identifier for this element
+     * @param type Type of UI element
+     * @param bounds Bounds of the element on screen
+     * @param text Text content of the element (if any)
+     * @param contentDescription Content description of the element (if any)
+     * @param clickable Whether the element is clickable
+     * @param enabled Whether the element is enabled
+     */
+    public UIElement(
+            @NonNull String id,
+            @NonNull UIElementType type,
+            @NonNull Rect bounds,
+            @Nullable String text,
+            @Nullable String contentDescription,
+            boolean clickable,
+            boolean enabled) {
+        this.id = id;
+        this.type = type;
+        this.bounds = bounds;
+        this.text = text;
+        this.contentDescription = contentDescription;
+        this.clickable = clickable;
+        this.enabled = enabled;
+    }
+    
+    /**
+     * Create a new UIElement with default values
+     * 
+     * @param id Unique identifier for this element
+     * @param type Type of UI element
+     * @param bounds Bounds of the element on screen
+     * @param text Text content of the element (if any)
+     */
+    public UIElement(
+            @NonNull String id,
+            @NonNull UIElementType type,
+            @NonNull Rect bounds,
+            @Nullable String text) {
+        this(id, type, bounds, text, null, true, true);
+    }
+
+    @NonNull
+    public String getId() {
+        return id;
+    }
+
+    @NonNull
+    public UIElementType getType() {
+        return type;
+    }
+
+    @NonNull
+    public Rect getBounds() {
+        return bounds;
+    }
+
+    @Nullable
+    public String getText() {
+        return text;
+    }
+
+    @Nullable
+    public String getContentDescription() {
+        return contentDescription;
+    }
+
+    public boolean isClickable() {
+        return clickable;
+    }
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+    
+    /**
+     * Get the center X coordinate of this element
+     * 
+     * @return Center X coordinate
+     */
+    public int getCenterX() {
+        return bounds.centerX();
+    }
+    
+    /**
+     * Get the center Y coordinate of this element
+     * 
+     * @return Center Y coordinate
+     */
+    public int getCenterY() {
+        return bounds.centerY();
+    }
+    
+    /**
+     * Check if this element contains the given coordinates
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return True if the coordinates are within this element's bounds
+     */
+    public boolean contains(int x, int y) {
+        return bounds.contains(x, y);
+    }
+    
+    /**
+     * Convert this UIElement to a StandardizedUIElement
+     * 
+     * @return StandardizedUIElement representation
+     */
+    @NonNull
+    public StandardizedUIElement toStandardized() {
+        StandardizedUIElementType elementType = 
+                StandardizedUIElementType.valueOf(type.name());
+        
+        return new StandardizedUIElement(
+                id,
+                elementType,
+                bounds,
+                text,
+                contentDescription,
+                clickable,
+                false, // Not scrollable in this implementation
+                enabled,
+                1.0f   // Default confidence
+        );
+    }
+    
+    /**
+     * Create a UIElement from a StandardizedUIElement
+     * 
+     * @param standardized StandardizedUIElement to convert
+     * @return UIElement representation
+     */
+    @NonNull
+    public static UIElement fromStandardized(@NonNull StandardizedUIElement standardized) {
+        UIElementType elementType;
+        try {
+            elementType = UIElementType.valueOf(standardized.getType().name());
+        } catch (IllegalArgumentException e) {
+            elementType = UIElementType.UNKNOWN;
+        }
+        
+        return new UIElement(
+                standardized.getId(),
+                elementType,
+                standardized.getBounds(),
+                standardized.getText(),
+                standardized.getContentDescription(),
+                standardized.isClickable(),
+                standardized.isEnabled()
+        );
+    }
+
+    @Override
+    public String toString() {
+        return "UIElement{" +
+                "id='" + id + '\'' +
+                ", type=" + type +
+                ", bounds=" + bounds +
+                ", text='" + text + '\'' +
+                ", clickable=" + clickable +
+                ", enabled=" + enabled +
+                '}';
+    }
+}

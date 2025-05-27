@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingVertical="8dp">
+
+    <ImageView
+        android:id="@+id/iv_app_icon"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:src="@android:drawable/sym_def_app_icon" />
+
+    <TextView
+        android:id="@+id/tv_app_name"
+        android:textSize="14sp"
+        android:textColor="#212121"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="8dp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toStartOf="@+id/tv_foreground"
+        app:layout_constraintStart_toEndOf="@+id/iv_app_icon"
+        app:layout_constraintTop_toTopOf="@+id/iv_app_icon"
+        tools:text="App Name" />
+
+    <TextView
+        android:id="@+id/tv_package_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="8dp"
+        android:textColor="#757575"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toStartOf="@+id/tv_foreground"
+        app:layout_constraintStart_toEndOf="@+id/iv_app_icon"
+        app:layout_constraintTop_toBottomOf="@+id/tv_app_name"
+        tools:text="com.example.app" />
+
+    <TextView
+        android:id="@+id/tv_foreground"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="#3F51B5"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="4dp"
+        android:text="Foreground"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:visibility="visible" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

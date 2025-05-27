@@ -1,0 +1,2143 @@
+package com.aiassistant.core;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.util.Log;
+import android.view.accessibility.AccessibilityNodeInfo;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import com.aiassistant.detection.GameAppElementDetector;
+import com.aiassistant.ml.AdvancedActionSequencer;
+import com.aiassistant.ml.ActionPrioritizer;
+import com.aiassistant.ml.DeepRLModel;
+import com.aiassistant.ml.GamePatternRecognizer;
+import com.aiassistant.ml.GameRuleUnderstanding;
+import com.aiassistant.ml.GameTrainer;
+import com.aiassistant.ml.OptimizedImageProcessor;
+import com.aiassistant.ml.PredictiveActionSystem;
+import com.aiassistant.ml.RuleExtractionSystem;
+import com.aiassistant.ml.UserFeedbackSystem;
+import com.aiassistant.utils.ScreenshotManager;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Auto AI Controller for autonomous and assisted operation
+ * 
+ * This controller manages autonomous AI operation, integrating all the advanced
+ * ML components for fast-paced gaming and app automation.
+ */
+public class AutoAIController {
+    private static final String TAG = "AutoAIController";
+    
+    /**
+     * Local ActionCallback interface in case AIController.ActionCallback is not available
+     */
+    interface ActionCallback {
+        /**
+         * Called when the action is successfully executed
+         */
+        void onSuccess();
+        
+        /**
+         * Called when the action fails to execute
+         * 
+         * @param reason Reason for failure
+         */
+        void onFailure(String reason);
+    }
+
+    /**
+     * Local GameType interface in case the original is not available
+     */
+    interface GameType {
+        /**
+         * Get the game type name
+         */
+        String getName();
+        
+        /**
+         * Get the game type identifier
+         */
+        String getId();
+    }
+    
+    // Singleton instance
+    private static AutoAIController instance;
+    
+    // Context
+    private final Context context;
+    
+    // AI Core components
+    private final AIController aiController;
+    private final PredictiveActionSystem predictiveSystem;
+    private final AdvancedActionSequencer actionSequencer;
+    private final GameRuleUnderstanding ruleUnderstanding;
+    private final DeepRLModel deepRLModel;
+    private final GameTrainer gameTrainer;
+    private final OptimizedImageProcessor imageProcessor;
+    private final RuleExtractionSystem ruleExtractor;
+    private final ActionPrioritizer actionPrioritizer;
+    private final GamePatternRecognizer patternRecognizer;
+    private final UserFeedbackSystem feedbackSystem;
+    
+    // Utility components
+    private final ScreenshotManager screenshotManager;
+    private final GameAppElementDetector elementDetector;
+    
+    // Operation mode
+    public enum OperationMode {
+        DISABLED,       // AI is completely disabled
+        OBSERVATION,    // Observe only, no suggestions or actions
+        SUGGESTION,     // Suggest actions but don't execute them
+        ASSISTED,       // Suggest and execute with confirmation
+        AUTONOMOUS      // Full autonomous operation
+    }
+    
+    private volatile OperationMode currentMode = OperationMode.OBSERVATION;
+    
+    // Risk levels for action confirmation
+    public enum RiskLevel {
+        LOW,        // Auto-approve without confirmation
+        MEDIUM,     // Auto-approve after short delay
+        HIGH,       // Require explicit confirmation
+        CRITICAL    // Never auto-approve, always require explicit confirmation
+    }
+    
+    // System state
+    private final AtomicBoolean initialized = new AtomicBoolean(false);
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    
+    // Execution tracking
+    private volatile long lastActionTime = 0;
+    private volatile int actionCount = 0;
+    private volatile int suggestionCount = 0;
+    private volatile int autoApprovalCount = 0;
+    private volatile String currentGameType = "unknown";
+    
+    // Executors
+    private final Executor backgroundExecutor;
+    private final ScheduledExecutorService scheduledExecutor;
+    
+    // Callbacks
+    public interface ActionSuggestionCallback {
+        void onActionSuggested(ActionSuggestion suggestion);
+        void onActionExecuted(ActionSuggestion suggestion, boolean success);
+        void onStatusChanged(OperationMode mode, String status);
+    }
+    
+    private final List<ActionSuggestionCallback> callbacks = new ArrayList<>();
+    
+    /**
+     * Action suggestion
+     */
+    public static class ActionSuggestion {
+        private final String id;
+        private final String actionType;
+        private final Map<String, Object> parameters;
+        private final String description;
+        private final float confidence;
+        private final RiskLevel riskLevel;
+        private final long creationTime;
+        private final long expirationTime;
+        private final String source;
+        
+        private long responseTime = 0;
+        private boolean approved = false;
+        private boolean executed = false;
+        private boolean successful = false;
+        
+        public ActionSuggestion(String actionType, Map<String, Object> parameters, 
+                               String description, float confidence, RiskLevel riskLevel,
+                               long expirationTimeMs, String source) {
+            this.id = "suggestion_" + System.currentTimeMillis() + "_" 
+                    + Math.round(Math.random() * 1000);
+            this.actionType = actionType;
+            this.parameters = new HashMap<>(parameters);
+            this.description = description;
+            this.confidence = confidence;
+            this.riskLevel = riskLevel;
+            this.creationTime = System.currentTimeMillis();
+            this.expirationTime = this.creationTime + expirationTimeMs;
+            this.source = source;
+        }
+        
+        public String getId() {
+            return id;
+        }
+        
+        public String getActionType() {
+            return actionType;
+        }
+        
+        public Map<String, Object> getParameters() {
+            return parameters;
+        }
+        
+        public String getDescription() {
+            return description;
+        }
+        
+        public float getConfidence() {
+            return confidence;
+        }
+        
+        public RiskLevel getRiskLevel() {
+            return riskLevel;
+        }
+        
+        public long getCreationTime() {
+            return creationTime;
+        }
+        
+        public long getExpirationTime() {
+            return expirationTime;
+        }
+        
+        public String getSource() {
+            return source;
+        }
+        
+        public boolean isExpired() {
+            return System.currentTimeMillis() > expirationTime;
+        }
+        
+        public void setApproved(boolean approved) {
+            this.approved = approved;
+            this.responseTime = System.currentTimeMillis();
+        }
+        
+        public boolean isApproved() {
+            return approved;
+        }
+        
+        public void setExecuted(boolean executed) {
+            this.executed = executed;
+        }
+        
+        public boolean isExecuted() {
+            return executed;
+        }
+        
+        public void setSuccessful(boolean successful) {
+            this.successful = successful;
+        }
+        
+        public boolean isSuccessful() {
+            return successful;
+        }
+        
+        public long getResponseTime() {
+            return responseTime;
+        }
+        
+        public long getResponseDelay() {
+            return responseTime > 0 ? responseTime - creationTime : 0;
+        }
+    }
+    
+    // Pending suggestions
+    private final List<ActionSuggestion> pendingSuggestions = new ArrayList<>();
+    
+    /**
+     * Get singleton instance
+     */
+    public static synchronized AutoAIController getInstance(@NonNull Context context) {
+        if (instance == null) {
+            instance = new AutoAIController(context.getApplicationContext());
+        }
+        return instance;
+    }
+    
+    /**
+     * Private constructor
+     */
+    private AutoAIController(Context context) {
+        this.context = context;
+        
+        // Get AI core components with defensive programming
+        try {
+            aiController = AIController.getInstance(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting AIController instance", e);
+        }
+        
+        try {
+            // Different PredictiveActionSystem implementations may have different getInstance signatures
+            try {
+                // Try getting static method with Context parameter
+                java.lang.reflect.Method getInstanceMethod = 
+                    PredictiveActionSystem.class.getMethod("getInstance", Context.class);
+                predictiveSystem = (PredictiveActionSystem) getInstanceMethod.invoke(null, context);
+            } catch (NoSuchMethodException e) {
+                // Try no-args getInstance
+                try {
+                    java.lang.reflect.Method getInstanceMethod = 
+                        PredictiveActionSystem.class.getMethod("getInstance");
+                    predictiveSystem = (PredictiveActionSystem) getInstanceMethod.invoke(null);
+                } catch (NoSuchMethodException ex) {
+                    // Try constructor
+                    try {
+                        predictiveSystem = new PredictiveActionSystem();
+                    } catch (Exception exc) {
+                        Log.e(TAG, "Could not instantiate PredictiveActionSystem", exc);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting PredictiveActionSystem instance", e);
+        }
+        
+        try {
+            actionSequencer = AdvancedActionSequencer.getInstance(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting AdvancedActionSequencer instance", e);
+        }
+        
+        try {
+            // GameRuleUnderstanding might not accept context
+            try {
+                ruleUnderstanding = GameRuleUnderstanding.getInstance();
+            } catch (Exception e) {
+                // Try with context as fallback
+                try {
+                    java.lang.reflect.Method getInstanceMethod = 
+                        GameRuleUnderstanding.class.getMethod("getInstance", Context.class);
+                    ruleUnderstanding = (GameRuleUnderstanding) getInstanceMethod.invoke(null, context);
+                } catch (Exception ex) {
+                    Log.e(TAG, "Could not get GameRuleUnderstanding instance", ex);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting GameRuleUnderstanding instance", e);
+        }
+        
+        try {
+            // DeepRLModel might not have the right getInstance method
+            try {
+                java.lang.reflect.Method getInstanceMethod = 
+                    DeepRLModel.class.getMethod("getInstance", Context.class);
+                deepRLModel = (DeepRLModel) getInstanceMethod.invoke(null, context);
+            } catch (NoSuchMethodException e) {
+                try {
+                    deepRLModel = DeepRLModel.getInstance();
+                } catch (Exception ex) {
+                    Log.e(TAG, "Could not get DeepRLModel instance", ex);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting DeepRLModel instance", e);
+        }
+        
+        try {
+            gameTrainer = GameTrainer.getInstance(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting GameTrainer instance", e);
+        }
+        
+        try {
+            imageProcessor = OptimizedImageProcessor.getInstance(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting OptimizedImageProcessor instance", e);
+        }
+        
+        try {
+            ruleExtractor = RuleExtractionSystem.getInstance(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting RuleExtractionSystem instance", e);
+        }
+        
+        try {
+            actionPrioritizer = ActionPrioritizer.getInstance(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting ActionPrioritizer instance", e);
+        }
+        
+        try {
+            patternRecognizer = GamePatternRecognizer.getInstance(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting GamePatternRecognizer instance", e);
+        }
+        
+        try {
+            feedbackSystem = UserFeedbackSystem.getInstance(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting UserFeedbackSystem instance", e);
+        }
+        
+        // Get utility components
+        screenshotManager = ScreenshotManager.getInstance(context);
+        elementDetector = GameAppElementDetector.getInstance(context);
+        
+        // Create executors
+        backgroundExecutor = Executors.newFixedThreadPool(2);
+        scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
+        
+        Log.i(TAG, "Auto AI Controller created");
+    }
+    
+    /**
+     * Initialize the controller
+     */
+    public void initialize() {
+        if (initialized.get()) {
+            return;
+        }
+        
+        // Register prediction callback
+        predictiveSystem.registerCallback(new PredictiveActionSystem.PredictionCallback() {
+            @Override
+            public void onStatePrediction(PredictiveActionSystem.GameState currentState, 
+                                         PredictiveActionSystem.GameState predictedState) {
+                // Process predicted state if in appropriate mode
+                if (running.get() && currentMode != OperationMode.DISABLED) {
+                    processPredictedState(currentState, predictedState);
+                }
+            }
+            
+            @Override
+            public void onActionRecommendation(PredictiveActionSystem.GameAction recommendedAction) {
+                // Convert to action suggestion
+                if (running.get() && currentMode != OperationMode.DISABLED) {
+                    processActionRecommendation(recommendedAction);
+                }
+            }
+        });
+        
+        // Register action sequencer callback
+        actionSequencer.registerCallback(new AdvancedActionSequencer.ActionCallback() {
+            @Override
+            public void onAction(PredictiveActionSystem.GameAction action) {
+                // Process action from sequence
+                if (running.get() && (currentMode == OperationMode.ASSISTED || 
+                                     currentMode == OperationMode.AUTONOMOUS)) {
+                    executeGameAction(action);
+                }
+            }
+            
+            @Override
+            public void onSequenceComplete(String sequenceId) {
+                Log.i(TAG, "Action sequence completed: " + sequenceId);
+            }
+            
+            @Override
+            public void onError(String error) {
+                Log.e(TAG, "Action sequencer error: " + error);
+            }
+        });
+        
+        // Schedule suggestion processor
+        scheduledExecutor.scheduleAtFixedRate(
+                this::processPendingSuggestions,
+                500,
+                250, // Check every 250ms
+                TimeUnit.MILLISECONDS);
+        
+        initialized.set(true);
+        Log.i(TAG, "Auto AI Controller initialized");
+    }
+    
+    /**
+     * Start the controller
+     */
+    public boolean start() {
+        if (!initialized.get()) {
+            Log.e(TAG, "Cannot start: not initialized");
+            return false;
+        }
+        
+        if (running.get()) {
+            Log.w(TAG, "Already running");
+            return true;
+        }
+        
+        // Start components with defensive programming approach
+        if (currentMode != OperationMode.DISABLED) {
+            // Start each component with error handling
+            safelyStartComponent(predictiveSystem, "predictiveSystem");
+            safelyStartComponent(actionSequencer, "actionSequencer");
+            safelyStartComponent(ruleExtractor, "ruleExtractor");
+            safelyStartComponent(patternRecognizer, "patternRecognizer");
+            safelyStartComponent(feedbackSystem, "feedbackSystem");
+            
+            if (currentMode == OperationMode.AUTONOMOUS) {
+                safelyStartComponent(deepRLModel, "deepRLModel");
+            }
+        }
+        
+        running.set(true);
+        
+        // Notify callbacks
+        for (ActionSuggestionCallback callback : callbacks) {
+            try {
+                callback.onStatusChanged(currentMode, "Auto AI Controller started");
+            } catch (Exception e) {
+                Log.e(TAG, "Error in status callback: " + e.getMessage());
+            }
+        }
+        
+        Log.i(TAG, "Auto AI Controller started");
+        return true;
+    }
+    
+    /**
+     * Stop the controller
+     */
+    public boolean stop() {
+        if (!running.get()) {
+            return false;
+        }
+        
+        // Stop components with defensive programming
+        safelyStopComponent(predictiveSystem, "predictiveSystem");
+        safelyStopComponent(actionSequencer, "actionSequencer");
+        safelyStopComponent(ruleExtractor, "ruleExtractor");
+        safelyStopComponent(patternRecognizer, "patternRecognizer");
+        safelyStopComponent(feedbackSystem, "feedbackSystem");
+        safelyStopComponent(deepRLModel, "deepRLModel");
+        
+        // Clear pending suggestions
+        synchronized (pendingSuggestions) {
+            pendingSuggestions.clear();
+        }
+        
+        running.set(false);
+        
+        // Notify callbacks
+        for (ActionSuggestionCallback callback : callbacks) {
+            try {
+                callback.onStatusChanged(currentMode, "Auto AI Controller stopped");
+            } catch (Exception e) {
+                Log.e(TAG, "Error in status callback: " + e.getMessage());
+            }
+        }
+        
+        Log.i(TAG, "Auto AI Controller stopped");
+        return true;
+    }
+    
+    /**
+     * Set operation mode
+     */
+    public void setOperationMode(OperationMode mode) {
+        if (mode == currentMode) {
+            return;
+        }
+        
+        OperationMode previousMode = currentMode;
+        currentMode = mode;
+        
+        if (running.get()) {
+            // If changing to/from disabled, start/stop components
+            if (previousMode == OperationMode.DISABLED && mode != OperationMode.DISABLED) {
+                // Start components with defensive programming
+                safelyStartComponent(predictiveSystem, "predictiveSystem");
+                safelyStartComponent(actionSequencer, "actionSequencer");
+                safelyStartComponent(ruleExtractor, "ruleExtractor");
+                safelyStartComponent(patternRecognizer, "patternRecognizer");
+                safelyStartComponent(feedbackSystem, "feedbackSystem");
+                
+                if (mode == OperationMode.AUTONOMOUS) {
+                    safelyStartComponent(deepRLModel, "deepRLModel");
+                }
+            } else if (previousMode != OperationMode.DISABLED && mode == OperationMode.DISABLED) {
+                // Stop components with defensive programming
+                safelyStopComponent(predictiveSystem, "predictiveSystem");
+                safelyStopComponent(actionSequencer, "actionSequencer");
+                safelyStopComponent(ruleExtractor, "ruleExtractor");
+                safelyStopComponent(patternRecognizer, "patternRecognizer");
+                safelyStopComponent(feedbackSystem, "feedbackSystem");
+                safelyStopComponent(deepRLModel, "deepRLModel");
+            } else if (mode == OperationMode.AUTONOMOUS && 
+                      previousMode != OperationMode.AUTONOMOUS) {
+                // Start RL model for autonomous mode
+                safelyStartComponent(deepRLModel, "deepRLModel");
+            } else if (mode != OperationMode.AUTONOMOUS && 
+                      previousMode == OperationMode.AUTONOMOUS) {
+                // Stop RL model when leaving autonomous mode
+                safelyStopComponent(deepRLModel, "deepRLModel");
+            }
+        }
+        
+        // Notify callbacks
+        for (ActionSuggestionCallback callback : callbacks) {
+            try {
+                callback.onStatusChanged(mode, "Operation mode changed to " + mode);
+            } catch (Exception e) {
+                Log.e(TAG, "Error in status callback: " + e.getMessage());
+            }
+        }
+        
+        Log.i(TAG, "Operation mode changed: " + previousMode + " -> " + mode);
+    }
+    
+    /**
+     * Get current operation mode
+     */
+    public OperationMode getOperationMode() {
+        return currentMode;
+    }
+    
+    /**
+     * Register action suggestion callback
+     */
+    public void registerCallback(ActionSuggestionCallback callback) {
+        if (callback != null && !callbacks.contains(callback)) {
+            callbacks.add(callback);
+        }
+    }
+    
+    /**
+     * Unregister action suggestion callback
+     */
+    public void unregisterCallback(ActionSuggestionCallback callback) {
+        callbacks.remove(callback);
+    }
+    
+    /**
+     * Set current game/app type
+     */
+    public void setGameType(String gameType) {
+        if (!gameType.equals(currentGameType)) {
+            currentGameType = gameType;
+            
+            // Update components with game type - defensive approach
+            safelySetGameType(predictiveSystem, "predictiveSystem", gameType);
+            safelySetGameType(ruleUnderstanding, "ruleUnderstanding", gameType);
+            safelySetGameType(deepRLModel, "deepRLModel", gameType);
+            safelySetGameType(patternRecognizer, "patternRecognizer", gameType);
+            
+            Log.i(TAG, "Game type set to: " + gameType);
+        }
+    }
+    
+    /**
+     * Process new screenshot and node info
+     */
+    public void processScreenFrame(Bitmap screenshot, AccessibilityNodeInfo rootNode,
+                                  @Nullable Runnable onComplete) {
+        if (!running.get() || currentMode == OperationMode.DISABLED || 
+                screenshot == null) {
+            if (onComplete != null) {
+                onComplete.run();
+            }
+            return;
+        }
+        
+        // Process on background thread
+        backgroundExecutor.execute(() -> {
+            try {
+                // Process image if optimization enabled
+                Bitmap processedImage = imageProcessor.processImage(screenshot);
+                
+                // Detect elements - handle type conversion safely
+                List<GameAppElementDetector.UIElement> elements;
+                
+                // First, convert the AccessibilityNodeInfo to GameType for compatibility
+                GameType gameTypeNode = convertToGameType(rootNode);
+                
+                try {
+                    // Try different overloads of detectElements with reflection, in case the method signature varies
+                    boolean elementDetectionSuccess = false;
+                    
+                    // First try: direct method with convertToGameType
+                    if (gameTypeNode != null) {
+                        try {
+                            // Try to find a method that takes (Bitmap, GameType)
+                            java.lang.reflect.Method detectMethod = elementDetector.getClass()
+                                .getMethod("detectElements", Bitmap.class, GameType.class);
+                            elements = (List<GameAppElementDetector.UIElement>) detectMethod.invoke(
+                                elementDetector, processedImage, gameTypeNode);
+                            elementDetectionSuccess = true;
+                            Log.d(TAG, "Successfully detected elements using GameType");
+                        } catch (Exception e) {
+                            Log.w(TAG, "Could not detect elements with GameType: " + e.getMessage());
+                        }
+                    }
+                    
+                    // Second try: direct AccessibilityNodeInfo parameter
+                    if (!elementDetectionSuccess) {
+                        try {
+                            // Try to find a method that takes (Bitmap, AccessibilityNodeInfo)
+                            java.lang.reflect.Method detectMethod = elementDetector.getClass()
+                                .getMethod("detectElements", Bitmap.class, AccessibilityNodeInfo.class);
+                            elements = (List<GameAppElementDetector.UIElement>) detectMethod.invoke(
+                                elementDetector, processedImage, rootNode);
+                            elementDetectionSuccess = true;
+                            Log.d(TAG, "Successfully detected elements using AccessibilityNodeInfo");
+                        } catch (Exception e) {
+                            Log.w(TAG, "Could not detect elements with AccessibilityNodeInfo: " + e.getMessage());
+                        }
+                    }
+                    
+                    // Third try: just the Bitmap parameter
+                    if (!elementDetectionSuccess) {
+                        try {
+                            // Try to find a method that takes only Bitmap
+                            java.lang.reflect.Method detectMethod = elementDetector.getClass()
+                                .getMethod("detectElements", Bitmap.class);
+                            elements = (List<GameAppElementDetector.UIElement>) detectMethod.invoke(
+                                elementDetector, processedImage);
+                            elementDetectionSuccess = true;
+                            Log.d(TAG, "Successfully detected elements using only Bitmap");
+                        } catch (Exception e) {
+                            Log.w(TAG, "Could not detect elements with Bitmap: " + e.getMessage());
+                        }
+                    }
+                    
+                    // Fourth try: try with Object type parameter as a last resort
+                    if (!elementDetectionSuccess) {
+                        try {
+                            // Try to find a method that takes (Bitmap, Object)
+                            java.lang.reflect.Method detectMethod = elementDetector.getClass()
+                                .getMethod("detectElements", Bitmap.class, Object.class);
+                            
+                            // Try with GameType first
+                            if (gameTypeNode != null) {
+                                elements = (List<GameAppElementDetector.UIElement>) detectMethod.invoke(
+                                    elementDetector, processedImage, gameTypeNode);
+                            } else {
+                                // Then fallback to null
+                                elements = (List<GameAppElementDetector.UIElement>) detectMethod.invoke(
+                                    elementDetector, processedImage, null);
+                            }
+                            elementDetectionSuccess = true;
+                            Log.d(TAG, "Successfully detected elements using Object parameter");
+                        } catch (Exception e) {
+                            Log.w(TAG, "Could not detect elements with Object parameter: " + e.getMessage());
+                        }
+                    }
+                    
+                    // If all attempts failed, create an empty list
+                    if (!elementDetectionSuccess) {
+                        Log.e(TAG, "All element detection methods failed, using empty list");
+                        elements = new ArrayList<>();
+                    }
+                    
+                } catch (Exception ex) {
+                    Log.e(TAG, "Element detection failed completely: " + ex.getMessage());
+                    elements = new ArrayList<>(); // Empty list as fallback
+                }
+                
+                // Feed to predictive system - safely
+                try {
+                    // Try with reflection to find correct method
+                    try {
+                        java.lang.reflect.Method processFrameMethod = 
+                                predictiveSystem.getClass().getMethod("processFrame", Bitmap.class, List.class);
+                        processFrameMethod.invoke(predictiveSystem, processedImage, elements);
+                    } catch (NoSuchMethodException e) {
+                        Log.w(TAG, "processFrame method not found, trying alternatives: " + e.getMessage());
+                        // Try alternative methods
+                        try {
+                            java.lang.reflect.Method processMethod = 
+                                    predictiveSystem.getClass().getMethod("process", Bitmap.class, List.class);
+                            processMethod.invoke(predictiveSystem, processedImage, elements);
+                        } catch (NoSuchMethodException ex) {
+                            Log.w(TAG, "No suitable process method found for predictiveSystem");
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error processing frame: " + e.getMessage());
+                }
+                
+                // Feed to rule extraction system - safely
+                Map<String, Object> state = extractState(processedImage, elements, rootNode);
+                String lastAction = "observe"; // Default action when just observing
+                try {
+                    // Try with reflection to find correct method
+                    try {
+                        java.lang.reflect.Method processObservationMethod = 
+                                ruleExtractor.getClass().getMethod("processObservation", 
+                                        Map.class, String.class, float.class);
+                        processObservationMethod.invoke(ruleExtractor, state, lastAction, 0.0f);
+                    } catch (NoSuchMethodException e) {
+                        Log.w(TAG, "processObservation method not found, trying alternatives: " + e.getMessage());
+                        // Try alternative methods
+                        try {
+                            java.lang.reflect.Method observeMethod = 
+                                    ruleExtractor.getClass().getMethod("observe", Map.class);
+                            observeMethod.invoke(ruleExtractor, state);
+                        } catch (NoSuchMethodException ex) {
+                            try {
+                                java.lang.reflect.Method updateMethod = 
+                                        ruleExtractor.getClass().getMethod("update", Map.class);
+                                updateMethod.invoke(ruleExtractor, state);
+                            } catch (NoSuchMethodException exc) {
+                                Log.w(TAG, "No suitable process method found for ruleExtractor");
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error processing observation: " + e.getMessage());
+                }
+                
+                // Feed to pattern recognizer - safely
+                try {
+                    // Try with reflection to find correct method
+                    java.lang.reflect.Method processFrameMethod = 
+                            patternRecognizer.getClass().getMethod("processFrame", List.class, Map.class);
+                    processFrameMethod.invoke(patternRecognizer, elements, state);
+                } catch (Exception e) {
+                    Log.w(TAG, "Error processing frame in pattern recognizer: " + e.getMessage());
+                }
+                
+                // Handle completion
+                if (onComplete != null) {
+                    onComplete.run();
+                }
+                
+            } catch (Exception e) {
+                Log.e(TAG, "Error processing screen frame: " + e.getMessage());
+                if (onComplete != null) {
+                    onComplete.run();
+                }
+            }
+        });
+    }
+    
+    /**
+     * Extract game state from screen image and elements
+     */
+    private Map<String, Object> extractState(Bitmap screenshot, 
+                                           List<GameAppElementDetector.UIElement> elements,
+                                           @Nullable AccessibilityNodeInfo rootNode) {
+        Map<String, Object> state = new HashMap<>();
+        
+        // Add basic information
+        state.put("timestamp", System.currentTimeMillis());
+        state.put("width", screenshot.getWidth());
+        state.put("height", screenshot.getHeight());
+        state.put("element_count", elements.size());
+        state.put("game_type", currentGameType);
+        
+        // Add element information
+        Map<String, Integer> elementTypes = new HashMap<>();
+        for (GameAppElementDetector.UIElement element : elements) {
+            String type = element.getType();
+            elementTypes.put(type, elementTypes.getOrDefault(type, 0) + 1);
+        }
+        state.put("element_types", elementTypes);
+        
+        // Add relevant rule data
+        if (rootNode != null) {
+            state.put("has_root_node", true);
+            state.put("package_name", 
+                    rootNode.getPackageName() != null ? 
+                    rootNode.getPackageName().toString() : "unknown");
+        } else {
+            state.put("has_root_node", false);
+        }
+        
+        return state;
+    }
+    
+    /**
+     * Process predicted state 
+     */
+    private void processPredictedState(PredictiveActionSystem.GameState currentState,
+                                     PredictiveActionSystem.GameState predictedState) {
+        if (currentState == null || predictedState == null) {
+            return;
+        }
+        
+        // In autonomous mode, let the RL model decide actions
+        if (currentMode == OperationMode.AUTONOMOUS) {
+            Map<String, Object> stateVector = convertToStateVector(currentState, predictedState);
+            
+            // Safely invoke selectAction with error handling and type conversion
+            int action = 0; // Default action (do nothing)
+            try {
+                // Try to call the method using reflection to handle different signatures
+                try {
+                    // First try with Map<String, Object>
+                    java.lang.reflect.Method selectActionMethod = 
+                            deepRLModel.getClass().getMethod("selectAction", Map.class);
+                    Object result = selectActionMethod.invoke(deepRLModel, stateVector);
+                    action = ((Number)result).intValue(); // Convert any number type to int
+                } catch (NoSuchMethodException e) {
+                    // Try with float[] if that fails
+                    try {
+                        // Convert Map to float array
+                        float[] stateArray = convertMapToFloatArray(stateVector);
+                        
+                        java.lang.reflect.Method selectActionMethod = 
+                                deepRLModel.getClass().getMethod("selectAction", float[].class);
+                        Object result = selectActionMethod.invoke(deepRLModel, stateArray);
+                        action = ((Number)result).intValue();
+                    } catch (NoSuchMethodException ex) {
+                        // Try with other common signatures
+                        try {
+                            // Try with generic Object
+                            java.lang.reflect.Method selectActionMethod = 
+                                    deepRLModel.getClass().getMethod("selectAction", Object.class);
+                            Object result = selectActionMethod.invoke(deepRLModel, stateVector);
+                            action = ((Number)result).intValue();
+                        } catch (NoSuchMethodException exc) {
+                            Log.w(TAG, "No compatible selectAction method found: " + exc.getMessage());
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error selecting action: " + e.getMessage());
+            }
+            
+            // Convert numeric action to game action
+            PredictiveActionSystem.GameAction gameAction = 
+                    convertModelActionToGameAction(action, currentState, predictedState);
+            
+            if (gameAction != null) {
+                // Execute the action
+                executeGameAction(gameAction);
+            }
+        }
+        
+        // In rule learning mode, analyze for pattern extraction
+        List<GameAppElementDetector.UIElement> elements = currentState.getElements();
+        Map<String, Object> stateData = currentState.getStateData();
+        
+        // Extract rules from state and elements - with error handling
+        try {
+            // Try to call the method using reflection to handle different signatures
+            try {
+                // First attempt with both parameters
+                java.lang.reflect.Method processGameStateMethod = 
+                        ruleUnderstanding.getClass().getMethod("processGameState", Map.class, List.class);
+                processGameStateMethod.invoke(ruleUnderstanding, stateData, elements);
+            } catch (NoSuchMethodException e) {
+                Log.w(TAG, "processGameState method not found, trying alternatives: " + e.getMessage());
+                // Try with just state data
+                try {
+                    java.lang.reflect.Method processMethod = 
+                            ruleUnderstanding.getClass().getMethod("processGameState", Map.class);
+                    processMethod.invoke(ruleUnderstanding, stateData);
+                } catch (NoSuchMethodException ex) {
+                    // Try with just elements
+                    try {
+                        java.lang.reflect.Method processElementsMethod = 
+                                ruleUnderstanding.getClass().getMethod("processElements", List.class);
+                        processElementsMethod.invoke(ruleUnderstanding, elements);
+                    } catch (NoSuchMethodException exc) {
+                        // Try analyze() as a common alternative
+                        try {
+                            java.lang.reflect.Method analyzeMethod = 
+                                    ruleUnderstanding.getClass().getMethod("analyze", Map.class, List.class);
+                            analyzeMethod.invoke(ruleUnderstanding, stateData, elements);
+                        } catch (NoSuchMethodException exce) {
+                            Log.w(TAG, "No suitable game state processing method found for ruleUnderstanding");
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing game state: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Convert state to vector for RL model
+     */
+    private Map<String, Object> convertToStateVector(
+            PredictiveActionSystem.GameState currentState,
+            PredictiveActionSystem.GameState predictedState) {
+        
+        Map<String, Object> stateVector = new HashMap<>();
+        
+        // Add basic state information
+        stateVector.putAll(currentState.getStateData());
+        
+        // Add elements of interest
+        List<GameAppElementDetector.UIElement> elements = currentState.getElements();
+        for (int i = 0; i < Math.min(5, elements.size()); i++) {
+            GameAppElementDetector.UIElement element = elements.get(i);
+            
+            // Add normalized position
+            float normX = element.getBounds().centerX() / 
+                    (float) stateVector.getOrDefault("screen_width", 1080);
+            float normY = element.getBounds().centerY() / 
+                    (float) stateVector.getOrDefault("screen_height", 2340);
+            
+            stateVector.put("element_" + i + "_x", normX);
+            stateVector.put("element_" + i + "_y", normY);
+            stateVector.put("element_" + i + "_type", element.getType());
+            stateVector.put("element_" + i + "_conf", element.getConfidence());
+        }
+        
+        // Add prediction information
+        long predictionTimeMs = (Long) predictedState.getMetadata().getOrDefault(
+                "predictionTimeMs", 100L);
+        stateVector.put("prediction_time_ms", predictionTimeMs);
+        
+        return stateVector;
+    }
+    
+    /**
+     * Convert model action to game action
+     */
+    private PredictiveActionSystem.GameAction convertModelActionToGameAction(
+            int action, 
+            PredictiveActionSystem.GameState currentState,
+            PredictiveActionSystem.GameState predictedState) {
+        
+        // This would convert a numeric action from the RL model
+        // into a specific game action based on the current state
+        
+        // Example mapping for different action types
+        switch (action) {
+            case 0: // Do nothing
+                return null;
+                
+            case 1: // Tap screen center
+                Map<String, Object> tapParams = new HashMap<>();
+                tapParams.put("x", 0.5f);
+                tapParams.put("y", 0.5f);
+                return new PredictiveActionSystem.GameAction(
+                        PredictiveActionSystem.ActionType.TAP,
+                        tapParams, 0.7f, 0.8f);
+                
+            case 2: // Swipe up
+                Map<String, Object> swipeUpParams = new HashMap<>();
+                swipeUpParams.put("startX", 0.5f);
+                swipeUpParams.put("startY", 0.7f);
+                swipeUpParams.put("endX", 0.5f);
+                swipeUpParams.put("endY", 0.3f);
+                swipeUpParams.put("duration", 100L);
+                return new PredictiveActionSystem.GameAction(
+                        PredictiveActionSystem.ActionType.SWIPE,
+                        swipeUpParams, 0.7f, 0.8f);
+            
+            // Additional mappings for other action types
+            default:
+                return null;
+        }
+    }
+    
+    /**
+     * Process action recommendation
+     */
+    private void processActionRecommendation(PredictiveActionSystem.GameAction action) {
+        // Convert to suggestion
+        ActionSuggestion suggestion = createSuggestionFromAction(action);
+        
+        // Add to pending suggestions
+        synchronized (pendingSuggestions) {
+            pendingSuggestions.add(suggestion);
+        }
+        
+        // Notify callbacks
+        for (ActionSuggestionCallback callback : callbacks) {
+            try {
+                callback.onActionSuggested(suggestion);
+            } catch (Exception e) {
+                Log.e(TAG, "Error in suggestion callback: " + e.getMessage());
+            }
+        }
+        
+        suggestionCount++;
+    }
+    
+    /**
+     * Create suggestion from game action
+     */
+    private ActionSuggestion createSuggestionFromAction(PredictiveActionSystem.GameAction action) {
+        // Determine action type
+        String actionType;
+        switch (action.getType()) {
+            case TAP:
+                actionType = "tap";
+                break;
+            case LONG_PRESS:
+                actionType = "long_press";
+                break;
+            case SWIPE:
+                actionType = "swipe";
+                break;
+            default:
+                actionType = action.getType().toString().toLowerCase();
+                break;
+        }
+        
+        // Create description
+        String description;
+        switch (action.getType()) {
+            case TAP:
+                float x = (Float) action.getParameters().getOrDefault("x", 0.5f);
+                float y = (Float) action.getParameters().getOrDefault("y", 0.5f);
+                description = String.format("Tap at position (%.2f, %.2f)", x, y);
+                break;
+            case SWIPE:
+                float startX = (Float) action.getParameters().getOrDefault("startX", 0.5f);
+                float startY = (Float) action.getParameters().getOrDefault("startY", 0.5f);
+                float endX = (Float) action.getParameters().getOrDefault("endX", 0.5f);
+                float endY = (Float) action.getParameters().getOrDefault("endY", 0.5f);
+                description = String.format("Swipe from (%.2f, %.2f) to (%.2f, %.2f)", 
+                        startX, startY, endX, endY);
+                break;
+            default:
+                description = "Perform " + actionType + " action";
+                break;
+        }
+        
+        // Determine risk level based on action type and confidence
+        RiskLevel riskLevel;
+        if (action.getConfidence() > 0.9f) {
+            riskLevel = RiskLevel.LOW;
+        } else if (action.getConfidence() > 0.7f) {
+            riskLevel = RiskLevel.MEDIUM;
+        } else if (action.getConfidence() > 0.5f) {
+            riskLevel = RiskLevel.HIGH;
+        } else {
+            riskLevel = RiskLevel.CRITICAL;
+        }
+        
+        // Create suggestion
+        return new ActionSuggestion(
+                actionType,
+                action.getParameters(),
+                description,
+                action.getConfidence(),
+                riskLevel,
+                5000, // 5 second expiration
+                "predictive_system");
+    }
+    
+    /**
+     * Process pending suggestions
+     */
+    private void processPendingSuggestions() {
+        if (!running.get() || currentMode == OperationMode.DISABLED ||
+                currentMode == OperationMode.OBSERVATION) {
+            return;
+        }
+        
+        List<ActionSuggestion> toProcess = new ArrayList<>();
+        
+        // Get pending suggestions
+        synchronized (pendingSuggestions) {
+            if (pendingSuggestions.isEmpty()) {
+                return;
+            }
+            
+            // Filter expired suggestions
+            pendingSuggestions.removeIf(ActionSuggestion::isExpired);
+            
+            // Copy suggestions for processing
+            toProcess.addAll(pendingSuggestions);
+        }
+        
+        // Process each suggestion
+        for (ActionSuggestion suggestion : toProcess) {
+            // Skip already processed suggestions
+            if (suggestion.isApproved() || suggestion.isExecuted()) {
+                continue;
+            }
+            
+            // Auto-approve based on mode and risk level
+            boolean autoApprove = false;
+            
+            if (currentMode == OperationMode.AUTONOMOUS) {
+                // In autonomous mode, auto-approve all except critical
+                autoApprove = suggestion.getRiskLevel() != RiskLevel.CRITICAL;
+            } else if (currentMode == OperationMode.ASSISTED) {
+                // In assisted mode, auto-approve low risk
+                autoApprove = suggestion.getRiskLevel() == RiskLevel.LOW;
+            }
+            
+            if (autoApprove) {
+                suggestion.setApproved(true);
+                autoApprovalCount++;
+                
+                // Execute right away
+                executeActionSuggestion(suggestion);
+            }
+        }
+    }
+    
+    /**
+     * Manually respond to a suggestion
+     */
+    public void respondToSuggestion(String suggestionId, boolean approved) {
+        synchronized (pendingSuggestions) {
+            for (ActionSuggestion suggestion : pendingSuggestions) {
+                if (suggestion.getId().equals(suggestionId)) {
+                    // Skip if already responded
+                    if (suggestion.isApproved() || suggestion.isExecuted()) {
+                        return;
+                    }
+                    
+                    suggestion.setApproved(approved);
+                    
+                    // Execute if approved
+                    if (approved) {
+                        executeActionSuggestion(suggestion);
+                    } else {
+                        // Remove from pending
+                        pendingSuggestions.remove(suggestion);
+                    }
+                    
+                    break;
+                }
+            }
+        }
+    }
+    
+    /**
+     * Execute a game action directly
+     */
+    private void executeGameAction(PredictiveActionSystem.GameAction action) {
+        if (!running.get() || currentMode == OperationMode.DISABLED ||
+                currentMode == OperationMode.OBSERVATION ||
+                currentMode == OperationMode.SUGGESTION) {
+            return;
+        }
+        
+        // Convert to coordinates and execute
+        switch (action.getType()) {
+            case TAP:
+                float x = (Float) action.getParameters().getOrDefault("x", 0.5f);
+                float y = (Float) action.getParameters().getOrDefault("y", 0.5f);
+                
+                // Get absolute screen coordinates
+                int screenWidth = (Integer) action.getParameters().getOrDefault("screen_width", 1080);
+                int screenHeight = (Integer) action.getParameters().getOrDefault("screen_height", 2340);
+                
+                int tapX = Math.round(x * screenWidth);
+                int tapY = Math.round(y * screenHeight);
+                
+                // Execute click through AI controller with error handling
+                try {
+                    // Try with callback parameter
+                    try {
+                        java.lang.reflect.Method clickMethod = 
+                                aiController.getClass().getMethod("clickAction", int.class, int.class, Object.class);
+                        clickMethod.invoke(aiController, tapX, tapY, null);
+                    } catch (NoSuchMethodException e) {
+                        // Try without callback parameter
+                        try {
+                            java.lang.reflect.Method clickMethod = 
+                                    aiController.getClass().getMethod("clickAction", int.class, int.class);
+                            clickMethod.invoke(aiController, tapX, tapY);
+                        } catch (NoSuchMethodException ex) {
+                            // Try with alternative method names
+                            try {
+                                // Try performClick
+                                java.lang.reflect.Method performClickMethod = 
+                                        aiController.getClass().getMethod("performClick", int.class, int.class);
+                                performClickMethod.invoke(aiController, tapX, tapY);
+                            } catch (NoSuchMethodException exc) {
+                                // Try tap method
+                                try {
+                                    java.lang.reflect.Method tapMethod = 
+                                            aiController.getClass().getMethod("tap", int.class, int.class);
+                                    tapMethod.invoke(aiController, tapX, tapY);
+                                } catch (NoSuchMethodException excp) {
+                                    Log.e(TAG, "No suitable click action method found in AIController");
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error executing click action: " + e.getMessage());
+                }
+                break;
+                
+            case LONG_PRESS:
+                float lpX = (Float) action.getParameters().getOrDefault("x", 0.5f);
+                float lpY = (Float) action.getParameters().getOrDefault("y", 0.5f);
+                
+                // Get absolute screen coordinates
+                int lpScreenWidth = (Integer) action.getParameters().getOrDefault("screen_width", 1080);
+                int lpScreenHeight = (Integer) action.getParameters().getOrDefault("screen_height", 2340);
+                
+                int longPressX = Math.round(lpX * lpScreenWidth);
+                int longPressY = Math.round(lpY * lpScreenHeight);
+                
+                // Execute long press through AI controller with error handling
+                try {
+                    // Try with callback parameter
+                    try {
+                        java.lang.reflect.Method longPressMethod = 
+                                aiController.getClass().getMethod("longPressAction", int.class, int.class, Object.class);
+                        longPressMethod.invoke(aiController, longPressX, longPressY, null);
+                    } catch (NoSuchMethodException e) {
+                        // Try without callback parameter
+                        try {
+                            java.lang.reflect.Method longPressMethod = 
+                                    aiController.getClass().getMethod("longPressAction", int.class, int.class);
+                            longPressMethod.invoke(aiController, longPressX, longPressY);
+                        } catch (NoSuchMethodException ex) {
+                            // Try with alternative method names
+                            try {
+                                // Try performLongPress
+                                java.lang.reflect.Method performLongPressMethod = 
+                                        aiController.getClass().getMethod("performLongPress", int.class, int.class);
+                                performLongPressMethod.invoke(aiController, longPressX, longPressY);
+                            } catch (NoSuchMethodException exc) {
+                                // Try longPress method
+                                try {
+                                    java.lang.reflect.Method longPressMethod = 
+                                            aiController.getClass().getMethod("longPress", int.class, int.class);
+                                    longPressMethod.invoke(aiController, longPressX, longPressY);
+                                } catch (NoSuchMethodException excp) {
+                                    Log.e(TAG, "No suitable long press action method found in AIController");
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error executing long press action: " + e.getMessage());
+                }
+                break;
+                
+            case SWIPE:
+                float startX = (Float) action.getParameters().getOrDefault("startX", 0.5f);
+                float startY = (Float) action.getParameters().getOrDefault("startY", 0.5f);
+                float endX = (Float) action.getParameters().getOrDefault("endX", 0.5f);
+                float endY = (Float) action.getParameters().getOrDefault("endY", 0.5f);
+                long duration = (Long) action.getParameters().getOrDefault("duration", 100L);
+                
+                // Get absolute screen coordinates
+                int swipeScreenWidth = (Integer) action.getParameters().getOrDefault("screen_width", 1080);
+                int swipeScreenHeight = (Integer) action.getParameters().getOrDefault("screen_height", 2340);
+                
+                int swipeStartX = Math.round(startX * swipeScreenWidth);
+                int swipeStartY = Math.round(startY * swipeScreenHeight);
+                int swipeEndX = Math.round(endX * swipeScreenWidth);
+                int swipeEndY = Math.round(endY * swipeScreenHeight);
+                
+                // Execute swipe through AI controller with error handling
+                try {
+                    // Try with callback parameter
+                    try {
+                        java.lang.reflect.Method swipeMethod = 
+                                aiController.getClass().getMethod("swipeAction", 
+                                        int.class, int.class, int.class, int.class, long.class, Object.class);
+                        swipeMethod.invoke(aiController, swipeStartX, swipeStartY, swipeEndX, swipeEndY, 
+                                duration, null);
+                    } catch (NoSuchMethodException e) {
+                        // Try without callback parameter
+                        try {
+                            java.lang.reflect.Method swipeMethod = 
+                                    aiController.getClass().getMethod("swipeAction", 
+                                            int.class, int.class, int.class, int.class, long.class);
+                            swipeMethod.invoke(aiController, swipeStartX, swipeStartY, swipeEndX, swipeEndY, 
+                                    duration);
+                        } catch (NoSuchMethodException ex) {
+                            // Try with alternative method names
+                            try {
+                                // Try performSwipe
+                                java.lang.reflect.Method performSwipeMethod = 
+                                        aiController.getClass().getMethod("performSwipe", 
+                                                int.class, int.class, int.class, int.class, long.class);
+                                performSwipeMethod.invoke(aiController, swipeStartX, swipeStartY, swipeEndX, swipeEndY, 
+                                        duration);
+                            } catch (NoSuchMethodException exc) {
+                                // Try swipe method
+                                try {
+                                    java.lang.reflect.Method swipeMethod = 
+                                            aiController.getClass().getMethod("swipe", 
+                                                    int.class, int.class, int.class, int.class);
+                                    swipeMethod.invoke(aiController, swipeStartX, swipeStartY, swipeEndX, swipeEndY);
+                                } catch (NoSuchMethodException excp) {
+                                    Log.e(TAG, "No suitable swipe action method found in AIController");
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error executing swipe action: " + e.getMessage());
+                }
+                break;
+                
+            default:
+                Log.w(TAG, "Unsupported action type: " + action.getType());
+                return;
+        }
+        
+        lastActionTime = System.currentTimeMillis();
+        actionCount++;
+    }
+    
+    /**
+     * Execute approved action suggestion
+     */
+    private void executeActionSuggestion(ActionSuggestion suggestion) {
+        if (!running.get() || currentMode == OperationMode.DISABLED ||
+                currentMode == OperationMode.OBSERVATION ||
+                currentMode == OperationMode.SUGGESTION) {
+            return;
+        }
+        
+        // Mark as being executed
+        suggestion.setExecuted(true);
+        
+        // Remove from pending
+        synchronized (pendingSuggestions) {
+            pendingSuggestions.remove(suggestion);
+        }
+        
+        // Convert to action parameters and execute
+        boolean success = false;
+        
+        try {
+            switch (suggestion.getActionType().toLowerCase()) {
+                case "tap":
+                    float x = (Float) suggestion.getParameters().getOrDefault("x", 0.5f);
+                    float y = (Float) suggestion.getParameters().getOrDefault("y", 0.5f);
+                    
+                    // Get screen dimensions
+                    int screenWidth = getScreenshotWidth(1080);
+                    int screenHeight = getScreenshotHeight(2340);
+                    
+                    if (screenWidth <= 0) screenWidth = 1080;
+                    if (screenHeight <= 0) screenHeight = 2340;
+                    
+                    int tapX = Math.round(x * screenWidth);
+                    int tapY = Math.round(y * screenHeight);
+                    
+                    // Execute click
+                    try {
+                        // Try to use AIController.ActionCallback if it exists
+                        Class<?> actionCallbackClass = null;
+                        try {
+                            // Try as a nested class
+                            actionCallbackClass = Class.forName("com.aiassistant.core.AIController$ActionCallback");
+                        } catch (ClassNotFoundException e) {
+                            // Use our local interface
+                            actionCallbackClass = ActionCallback.class;
+                        }
+                        
+                        // Create a dynamic proxy for the callback
+                        Object callback = java.lang.reflect.Proxy.newProxyInstance(
+                                getClass().getClassLoader(),
+                                new Class<?>[] { actionCallbackClass },
+                                new java.lang.reflect.InvocationHandler() {
+                                    @Override
+                                    public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) {
+                                        String methodName = method.getName();
+                                        if ("onSuccess".equals(methodName)) {
+                                            suggestion.setSuccessful(true);
+                                            notifySuggestionExecuted(suggestion, true);
+                                            return null;
+                                        } else if ("onFailure".equals(methodName)) {
+                                            suggestion.setSuccessful(false);
+                                            notifySuggestionExecuted(suggestion, false);
+                                            Log.e(TAG, "Action execution failed: " + (args != null && args.length > 0 ? args[0] : "unknown"));
+                                            return null;
+                                        }
+                                        return null;
+                                    }
+                                });
+                        
+                        // Invoke click action with callback
+                        java.lang.reflect.Method clickMethod = 
+                                aiController.getClass().getMethod("clickAction", int.class, int.class, actionCallbackClass);
+                        clickMethod.invoke(aiController, tapX, tapY, callback);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error executing click action with callback: " + e.getMessage());
+                        // Fallback to simpler version
+                        try {
+                            java.lang.reflect.Method clickMethod = 
+                                    aiController.getClass().getMethod("clickAction", int.class, int.class);
+                            clickMethod.invoke(aiController, tapX, tapY);
+                            suggestion.setSuccessful(true);
+                            notifySuggestionExecuted(suggestion, true);
+                        } catch (Exception ex) {
+                            Log.e(TAG, "Error executing click action: " + ex.getMessage());
+                            suggestion.setSuccessful(false);
+                            notifySuggestionExecuted(suggestion, false);
+                        }
+                    }
+                    success = true;
+                    break;
+                    
+                case "long_press":
+                    float lpX = (Float) suggestion.getParameters().getOrDefault("x", 0.5f);
+                    float lpY = (Float) suggestion.getParameters().getOrDefault("y", 0.5f);
+                    
+                    // Get screen dimensions
+                    int lpScreenWidth = getScreenshotWidth(1080);
+                    int lpScreenHeight = getScreenshotHeight(2340);
+                    
+                    if (lpScreenWidth <= 0) lpScreenWidth = 1080;
+                    if (lpScreenHeight <= 0) lpScreenHeight = 2340;
+                    
+                    int longPressX = Math.round(lpX * lpScreenWidth);
+                    int longPressY = Math.round(lpY * lpScreenHeight);
+                    
+                    // Execute long press
+                    try {
+                        // Try to use AIController.ActionCallback if it exists
+                        Class<?> actionCallbackClass = null;
+                        try {
+                            // Try as a nested class
+                            actionCallbackClass = Class.forName("com.aiassistant.core.AIController$ActionCallback");
+                        } catch (ClassNotFoundException e) {
+                            // Use our local interface
+                            actionCallbackClass = ActionCallback.class;
+                        }
+                        
+                        // Create a dynamic proxy for the callback
+                        Object callback = java.lang.reflect.Proxy.newProxyInstance(
+                                getClass().getClassLoader(),
+                                new Class<?>[] { actionCallbackClass },
+                                new java.lang.reflect.InvocationHandler() {
+                                    @Override
+                                    public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) {
+                                        String methodName = method.getName();
+                                        if ("onSuccess".equals(methodName)) {
+                                            suggestion.setSuccessful(true);
+                                            notifySuggestionExecuted(suggestion, true);
+                                            return null;
+                                        } else if ("onFailure".equals(methodName)) {
+                                            suggestion.setSuccessful(false);
+                                            notifySuggestionExecuted(suggestion, false);
+                                            Log.e(TAG, "Action execution failed: " + (args != null && args.length > 0 ? args[0] : "unknown"));
+                                            return null;
+                                        }
+                                        return null;
+                                    }
+                                });
+                        
+                        // Invoke long press action with callback
+                        java.lang.reflect.Method longPressMethod = 
+                                aiController.getClass().getMethod("longPressAction", int.class, int.class, actionCallbackClass);
+                        longPressMethod.invoke(aiController, longPressX, longPressY, callback);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error executing long press action with callback: " + e.getMessage());
+                        // Fallback to simpler version
+                        try {
+                            java.lang.reflect.Method longPressMethod = 
+                                    aiController.getClass().getMethod("longPressAction", int.class, int.class);
+                            longPressMethod.invoke(aiController, longPressX, longPressY);
+                            suggestion.setSuccessful(true);
+                            notifySuggestionExecuted(suggestion, true);
+                        } catch (Exception ex) {
+                            Log.e(TAG, "Error executing long press action: " + ex.getMessage());
+                            suggestion.setSuccessful(false);
+                            notifySuggestionExecuted(suggestion, false);
+                        }
+                    }
+                    success = true;
+                    break;
+                    
+                case "swipe":
+                    float startX = (Float) suggestion.getParameters().getOrDefault("startX", 0.5f);
+                    float startY = (Float) suggestion.getParameters().getOrDefault("startY", 0.5f);
+                    float endX = (Float) suggestion.getParameters().getOrDefault("endX", 0.5f);
+                    float endY = (Float) suggestion.getParameters().getOrDefault("endY", 0.5f);
+                    long duration = (Long) suggestion.getParameters().getOrDefault("duration", 100L);
+                    
+                    // Get screen dimensions
+                    int swipeScreenWidth = getScreenshotWidth(1080);
+                    int swipeScreenHeight = getScreenshotHeight(2340);
+                    
+                    if (swipeScreenWidth <= 0) swipeScreenWidth = 1080;
+                    if (swipeScreenHeight <= 0) swipeScreenHeight = 2340;
+                    
+                    int swipeStartX = Math.round(startX * swipeScreenWidth);
+                    int swipeStartY = Math.round(startY * swipeScreenHeight);
+                    int swipeEndX = Math.round(endX * swipeScreenWidth);
+                    int swipeEndY = Math.round(endY * swipeScreenHeight);
+                    
+                    // Execute swipe
+                    try {
+                        // Try to use AIController.ActionCallback if it exists
+                        Class<?> actionCallbackClass = null;
+                        try {
+                            // Try as a nested class
+                            actionCallbackClass = Class.forName("com.aiassistant.core.AIController$ActionCallback");
+                        } catch (ClassNotFoundException e) {
+                            // Use our local interface
+                            actionCallbackClass = ActionCallback.class;
+                        }
+                        
+                        // Create a dynamic proxy for the callback
+                        Object callback = java.lang.reflect.Proxy.newProxyInstance(
+                                getClass().getClassLoader(),
+                                new Class<?>[] { actionCallbackClass },
+                                new java.lang.reflect.InvocationHandler() {
+                                    @Override
+                                    public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) {
+                                        String methodName = method.getName();
+                                        if ("onSuccess".equals(methodName)) {
+                                            suggestion.setSuccessful(true);
+                                            notifySuggestionExecuted(suggestion, true);
+                                            return null;
+                                        } else if ("onFailure".equals(methodName)) {
+                                            suggestion.setSuccessful(false);
+                                            notifySuggestionExecuted(suggestion, false);
+                                            Log.e(TAG, "Action execution failed: " + (args != null && args.length > 0 ? args[0] : "unknown"));
+                                            return null;
+                                        }
+                                        return null;
+                                    }
+                                });
+                        
+                        // Invoke swipe action with callback
+                        java.lang.reflect.Method swipeMethod = 
+                                aiController.getClass().getMethod("swipeAction", int.class, int.class, 
+                                        int.class, int.class, long.class, actionCallbackClass);
+                        swipeMethod.invoke(aiController, swipeStartX, swipeStartY, swipeEndX, swipeEndY, 
+                                duration, callback);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error executing swipe action with callback: " + e.getMessage());
+                        // Fallback to simpler version
+                        try {
+                            java.lang.reflect.Method swipeMethod = 
+                                    aiController.getClass().getMethod("swipeAction", int.class, int.class, 
+                                            int.class, int.class, long.class);
+                            swipeMethod.invoke(aiController, swipeStartX, swipeStartY, swipeEndX, swipeEndY, 
+                                    duration);
+                            suggestion.setSuccessful(true);
+                            notifySuggestionExecuted(suggestion, true);
+                        } catch (Exception ex) {
+                            Log.e(TAG, "Error executing swipe action: " + ex.getMessage());
+                            suggestion.setSuccessful(false);
+                            notifySuggestionExecuted(suggestion, false);
+                        }
+                    }
+                    success = true;
+                    break;
+                    
+                default:
+                    Log.w(TAG, "Unsupported action type: " + suggestion.getActionType());
+                    success = false;
+                    break;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error executing action: " + e.getMessage());
+            success = false;
+        }
+        
+        // Handle synchronous failure
+        if (!success) {
+            suggestion.setSuccessful(false);
+            notifySuggestionExecuted(suggestion, false);
+        } else {
+            lastActionTime = System.currentTimeMillis();
+            actionCount++;
+        }
+    }
+    
+    /**
+     * Notify suggestion executed
+     */
+    private void notifySuggestionExecuted(ActionSuggestion suggestion, boolean success) {
+        for (ActionSuggestionCallback callback : callbacks) {
+            try {
+                callback.onActionExecuted(suggestion, success);
+            } catch (Exception e) {
+                Log.e(TAG, "Error in action executed callback: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Get rule understanding recommendations
+     */
+    public List<Map<String, Object>> getRuleRecommendations() {
+        List<Map<String, Object>> recommendations = new ArrayList<>();
+        
+        // Get rules relevant to current state
+        PredictiveActionSystem.GameState currentState = predictiveSystem.getCurrentState();
+        if (currentState != null) {
+            Map<String, Object> state = currentState.getStateData();
+            List<RuleExtractionSystem.GameRule> relevantRules = 
+                    ruleExtractor.findRelevantRules(state, null);
+            
+            // Convert to recommendations
+            for (RuleExtractionSystem.GameRule rule : relevantRules) {
+                if (rule.getConfidence() > 0.6f) {
+                    Map<String, Object> recommendation = new HashMap<>();
+                    recommendation.put("id", rule.getId());
+                    recommendation.put("name", rule.getName());
+                    recommendation.put("description", rule.getDescription());
+                    recommendation.put("confidence", rule.getConfidence());
+                    recommendation.put("type", rule.getType().toString());
+                    
+                    recommendations.add(recommendation);
+                }
+            }
+        }
+        
+        return recommendations;
+    }
+    
+    /**
+     * Execute a predefined action sequence
+     */
+    public boolean executeActionSequence(String sequenceType) {
+        if (!running.get() || currentMode == OperationMode.DISABLED ||
+                currentMode == OperationMode.OBSERVATION ||
+                currentMode == OperationMode.SUGGESTION) {
+            return false;
+        }
+        
+        // Create combo sequence
+        AdvancedActionSequencer.ActionSequence sequence = 
+                actionSequencer.createComboSequence("auto_sequence", sequenceType);
+        
+        // Execute sequence
+        return actionSequencer.executeSequence(sequence);
+    }
+    
+    /**
+     * Get statistics
+     */
+    public Map<String, Object> getStats() {
+        Map<String, Object> stats = new HashMap<>();
+        
+        stats.put("initialized", initialized.get());
+        stats.put("running", running.get());
+        stats.put("mode", currentMode.toString());
+        stats.put("gameType", currentGameType);
+        stats.put("actionCount", actionCount);
+        stats.put("suggestionCount", suggestionCount);
+        stats.put("autoApprovalCount", autoApprovalCount);
+        stats.put("lastActionTime", lastActionTime);
+        stats.put("pendingSuggestions", pendingSuggestions.size());
+        
+        // Get component stats
+        if (running.get()) {
+            stats.put("predictiveSystem", predictiveSystem.getStats());
+            stats.put("ruleExtractor", ruleExtractor.getStats());
+            stats.put("actionSequencer", actionSequencer.getStats());
+        }
+        
+        return stats;
+    }
+    
+    /**
+     * Release resources
+     */
+    public void release() {
+        // Stop the controller
+        stop();
+        
+        // Shutdown executors
+        scheduledExecutor.shutdown();
+        try {
+            if (!scheduledExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+                scheduledExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            scheduledExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        
+        // Clear data
+        synchronized (pendingSuggestions) {
+            pendingSuggestions.clear();
+        }
+        callbacks.clear();
+        
+        // Release components
+        deepRLModel.release();
+        
+        initialized.set(false);
+        
+        Log.i(TAG, "Auto AI Controller released");
+    }
+    
+    /**
+     * Safely starts a component with error handling
+     * 
+     * @param component Component to start
+     * @param componentName Name of the component for logging
+     */
+    private void safelyStartComponent(Object component, String componentName) {
+        if (component == null) {
+            Log.w(TAG, componentName + " is null, cannot start");
+            return;
+        }
+        
+        try {
+            // Try to call start() method via reflection to ensure it exists
+            try {
+                java.lang.reflect.Method startMethod = component.getClass().getMethod("start");
+                startMethod.invoke(component);
+                Log.d(TAG, "Started " + componentName);
+            } catch (NoSuchMethodException e) {
+                // Try initialize() as alternative
+                try {
+                    java.lang.reflect.Method initMethod = component.getClass().getMethod("initialize");
+                    initMethod.invoke(component);
+                    Log.d(TAG, "Initialized " + componentName + " as alternative to start");
+                } catch (NoSuchMethodException ex) {
+                    // No suitable method found
+                    Log.w(TAG, componentName + " has no start() or initialize() method");
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting " + componentName, e);
+        }
+    }
+    
+    /**
+     * Safely stops a component with error handling
+     * 
+     * @param component Component to stop
+     * @param componentName Name of the component for logging
+     */
+    private void safelyStopComponent(Object component, String componentName) {
+        if (component == null) {
+            Log.w(TAG, componentName + " is null, cannot stop");
+            return;
+        }
+        
+        try {
+            // Try to call stop() method via reflection to ensure it exists
+            try {
+                java.lang.reflect.Method stopMethod = component.getClass().getMethod("stop");
+                stopMethod.invoke(component);
+                Log.d(TAG, "Stopped " + componentName);
+            } catch (NoSuchMethodException e) {
+                // Try shutdown(), close(), or release() as alternatives
+                try {
+                    try {
+                        java.lang.reflect.Method shutdownMethod = component.getClass().getMethod("shutdown");
+                        shutdownMethod.invoke(component);
+                        Log.d(TAG, "Shutdown " + componentName + " as alternative to stop");
+                        return;
+                    } catch (NoSuchMethodException ex) {
+                        // Try close()
+                    }
+                    
+                    try {
+                        java.lang.reflect.Method closeMethod = component.getClass().getMethod("close");
+                        closeMethod.invoke(component);
+                        Log.d(TAG, "Closed " + componentName + " as alternative to stop");
+                        return;
+                    } catch (NoSuchMethodException ex) {
+                        // Try release()
+                    }
+                    
+                    try {
+                        java.lang.reflect.Method releaseMethod = component.getClass().getMethod("release");
+                        releaseMethod.invoke(component);
+                        Log.d(TAG, "Released " + componentName + " as alternative to stop");
+                        return;
+                    } catch (NoSuchMethodException ex) {
+                        // No suitable method found
+                        Log.w(TAG, componentName + " has no stop/shutdown/close/release method");
+                    }
+                } catch (Exception ex) {
+                    Log.e(TAG, "Error trying alternative stop methods for " + componentName, ex);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping " + componentName, e);
+        }
+    }
+    
+    /**
+     * Convert AccessibilityNodeInfo to GameType
+     * 
+     * @param nodeInfo The accessibility node info
+     * @return Converted GameType object or null if conversion fails
+     */
+    private GameType convertToGameType(AccessibilityNodeInfo nodeInfo) {
+        if (nodeInfo == null) {
+            return null;
+        }
+        
+        try {
+            // This is a simple adapter implementation
+            // A real implementation would extract meaningful game type info from the node
+            // For now, we create a basic adapter that wraps the node info
+            
+            // First try using reflection to find a GameType implementation
+            try {
+                // Try different possible GameType classes
+                Class<?> gameTypeClass = null;
+                try {
+                    gameTypeClass = Class.forName("com.aiassistant.ml.GameType");
+                } catch (ClassNotFoundException e) {
+                    try {
+                        gameTypeClass = Class.forName("com.aiassistant.models.GameType");
+                    } catch (ClassNotFoundException ex) {
+                        try {
+                            gameTypeClass = Class.forName("com.aiassistant.core.GameType");
+                        } catch (ClassNotFoundException exc) {
+                            // Could not find any GameType class, will use local interface
+                        }
+                    }
+                }
+                
+                // If we found a GameType class, try to instantiate it
+                if (gameTypeClass != null) {
+                    try {
+                        // Try constructor with AccessibilityNodeInfo
+                        java.lang.reflect.Constructor<?> constructor = 
+                                gameTypeClass.getConstructor(AccessibilityNodeInfo.class);
+                        return (GameType) constructor.newInstance(nodeInfo);
+                    } catch (NoSuchMethodException e) {
+                        // Try string constructor with package name
+                        try {
+                            String packageName = nodeInfo.getPackageName() != null ? 
+                                    nodeInfo.getPackageName().toString() : "unknown";
+                            
+                            java.lang.reflect.Constructor<?> constructor = 
+                                    gameTypeClass.getConstructor(String.class);
+                            return (GameType) constructor.newInstance(packageName);
+                        } catch (NoSuchMethodException ex) {
+                            // Try default constructor with setters
+                            try {
+                                Object instance = gameTypeClass.newInstance();
+                                // Try to set properties via reflection
+                                try {
+                                    String packageName = nodeInfo.getPackageName() != null ? 
+                                            nodeInfo.getPackageName().toString() : "unknown";
+                                    
+                                    java.lang.reflect.Method setNameMethod = 
+                                            gameTypeClass.getMethod("setName", String.class);
+                                    setNameMethod.invoke(instance, packageName);
+                                    
+                                    java.lang.reflect.Method setIdMethod = 
+                                            gameTypeClass.getMethod("setId", String.class);
+                                    setIdMethod.invoke(instance, String.valueOf(System.identityHashCode(nodeInfo)));
+                                    
+                                    return (GameType) instance;
+                                } catch (Exception exc) {
+                                    Log.w(TAG, "Could not set GameType properties: " + exc.getMessage());
+                                }
+                            } catch (Exception exc) {
+                                // No suitable constructor
+                                Log.w(TAG, "No suitable GameType constructor found: " + exc.getMessage());
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error creating GameType from AccessibilityNodeInfo: " + e.getMessage());
+            }
+            
+            // If all reflection attempts fail, create a local implementation
+            return new GameType() {
+                @Override
+                public String getName() {
+                    return nodeInfo.getPackageName() != null ? 
+                            nodeInfo.getPackageName().toString() : "unknown";
+                }
+                
+                @Override
+                public String getId() {
+                    return String.valueOf(System.identityHashCode(nodeInfo));
+                }
+                
+                // Additional methods would be implemented here
+            };
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to convert AccessibilityNodeInfo to GameType: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Safely sets the game type on a component with error handling
+     * 
+     * @param component Component to update
+     * @param componentName Name of the component for logging
+     * @param gameType Game type to set
+     */
+    private void safelySetGameType(Object component, String componentName, String gameType) {
+        if (component == null) {
+            Log.w(TAG, componentName + " is null, cannot set game type");
+            return;
+        }
+        
+        if (gameType == null) {
+            Log.w(TAG, "Cannot set null game type on " + componentName);
+            return;
+        }
+        
+        try {
+            // Try to call setGameType() method via reflection to ensure it exists
+            try {
+                java.lang.reflect.Method setGameTypeMethod = component.getClass().getMethod("setGameType", String.class);
+                setGameTypeMethod.invoke(component, gameType);
+                Log.d(TAG, "Set game type " + gameType + " on " + componentName);
+            } catch (NoSuchMethodException e) {
+                // Try setType() as alternative 
+                try {
+                    java.lang.reflect.Method setTypeMethod = component.getClass().getMethod("setType", String.class);
+                    setTypeMethod.invoke(component, gameType);
+                    Log.d(TAG, "Set type " + gameType + " on " + componentName + " as alternative");
+                } catch (NoSuchMethodException ex) {
+                    // Try configure() with type parameter
+                    try {
+                        java.lang.reflect.Method configureMethod = component.getClass().getMethod("configure", Map.class);
+                        Map<String, Object> configParams = new HashMap<>();
+                        configParams.put("gameType", gameType);
+                        configParams.put("type", gameType);
+                        configureMethod.invoke(component, configParams);
+                        Log.d(TAG, "Configured with game type " + gameType + " on " + componentName + " as alternative");
+                    } catch (NoSuchMethodException exc) {
+                        // No suitable method found
+                        Log.w(TAG, componentName + " has no setGameType/setType/configure method");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting game type on " + componentName, e);
+        }
+    }
+    
+    /**
+     * Convert a Map<String, Object> to float[] for models that require array input
+     * 
+     * @param stateMap The state map to convert
+     * @return A float array with the values from the map
+     */
+    private float[] convertMapToFloatArray(Map<String, Object> stateMap) {
+        if (stateMap == null || stateMap.isEmpty()) {
+            return new float[0];
+        }
+        
+        // Sort keys for consistent ordering
+        List<String> keys = new ArrayList<>(stateMap.keySet());
+        Collections.sort(keys);
+        
+        float[] result = new float[keys.size()];
+        
+        for (int i = 0; i < keys.size(); i++) {
+            String key = keys.get(i);
+            Object value = stateMap.get(key);
+            
+            if (value instanceof Number) {
+                result[i] = ((Number) value).floatValue();
+            } else if (value instanceof Boolean) {
+                result[i] = ((Boolean) value) ? 1.0f : 0.0f;
+            } else if (value instanceof String) {
+                try {
+                    // Try to parse as a number if possible
+                    result[i] = Float.parseFloat((String) value);
+                } catch (NumberFormatException e) {
+                    // Hash the string to a float value for categorical variables
+                    result[i] = (float) ((String) value).hashCode() / Integer.MAX_VALUE;
+                }
+            } else {
+                // Default for other types
+                result[i] = 0.0f;
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Safely get the screenshot width
+     * 
+     * @param defaultWidth Default width to return if method not found
+     * @return Screenshot width or default width if not available
+     */
+    private int getScreenshotWidth(int defaultWidth) {
+        if (screenshotManager == null) {
+            return defaultWidth;
+        }
+        
+        try {
+            // Try getLastScreenshotWidth first
+            try {
+                java.lang.reflect.Method getWidthMethod = 
+                        screenshotManager.getClass().getMethod("getLastScreenshotWidth");
+                Object result = getWidthMethod.invoke(screenshotManager);
+                return (result instanceof Integer) ? (Integer) result : defaultWidth;
+            } catch (NoSuchMethodException e) {
+                // Try alternative methods
+                try {
+                    java.lang.reflect.Method getWidthMethod = 
+                            screenshotManager.getClass().getMethod("getScreenWidth");
+                    Object result = getWidthMethod.invoke(screenshotManager);
+                    return (result instanceof Integer) ? (Integer) result : defaultWidth;
+                } catch (NoSuchMethodException ex) {
+                    // Try to get from latest screenshot
+                    try {
+                        java.lang.reflect.Method getScreenshotMethod = 
+                                screenshotManager.getClass().getMethod("getLatestScreenshot");
+                        Object screenshot = getScreenshotMethod.invoke(screenshotManager);
+                        if (screenshot != null) {
+                            try {
+                                java.lang.reflect.Method getWidthMethod = 
+                                        screenshot.getClass().getMethod("getWidth");
+                                Object result = getWidthMethod.invoke(screenshot);
+                                return (result instanceof Integer) ? (Integer) result : defaultWidth;
+                            } catch (Exception exc) {
+                                return defaultWidth;
+                            }
+                        }
+                    } catch (Exception exc) {
+                        return defaultWidth;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error getting screenshot width: " + e.getMessage());
+        }
+        
+        return defaultWidth;
+    }
+    
+    /**
+     * Safely get the screenshot height
+     * 
+     * @param defaultHeight Default height to return if method not found
+     * @return Screenshot height or default height if not available
+     */
+    private int getScreenshotHeight(int defaultHeight) {
+        if (screenshotManager == null) {
+            return defaultHeight;
+        }
+        
+        try {
+            // Try getLastScreenshotHeight first
+            try {
+                java.lang.reflect.Method getHeightMethod = 
+                        screenshotManager.getClass().getMethod("getLastScreenshotHeight");
+                Object result = getHeightMethod.invoke(screenshotManager);
+                return (result instanceof Integer) ? (Integer) result : defaultHeight;
+            } catch (NoSuchMethodException e) {
+                // Try alternative methods
+                try {
+                    java.lang.reflect.Method getHeightMethod = 
+                            screenshotManager.getClass().getMethod("getScreenHeight");
+                    Object result = getHeightMethod.invoke(screenshotManager);
+                    return (result instanceof Integer) ? (Integer) result : defaultHeight;
+                } catch (NoSuchMethodException ex) {
+                    // Try to get from latest screenshot
+                    try {
+                        java.lang.reflect.Method getScreenshotMethod = 
+                                screenshotManager.getClass().getMethod("getLatestScreenshot");
+                        Object screenshot = getScreenshotMethod.invoke(screenshotManager);
+                        if (screenshot != null) {
+                            try {
+                                java.lang.reflect.Method getHeightMethod = 
+                                        screenshot.getClass().getMethod("getHeight");
+                                Object result = getHeightMethod.invoke(screenshot);
+                                return (result instanceof Integer) ? (Integer) result : defaultHeight;
+                            } catch (Exception exc) {
+                                return defaultHeight;
+                            }
+                        }
+                    } catch (Exception exc) {
+                        return defaultHeight;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error getting screenshot height: " + e.getMessage());
+        }
+        
+        return defaultHeight;
+    }
+}

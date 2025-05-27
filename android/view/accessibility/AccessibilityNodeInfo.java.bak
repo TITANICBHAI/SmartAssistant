@@ -1,0 +1,139 @@
+package android.view.accessibility;
+
+/**
+ * Mock implementation of Android's AccessibilityNodeInfo class
+ * This is a simplified version for compatibility with AIController code
+ */
+public class AccessibilityNodeInfo {
+    private String packageName;
+    private String className;
+    private String text;
+    private String contentDescription;
+    
+    /**
+     * Default constructor
+     */
+    public AccessibilityNodeInfo() {
+        this.packageName = "";
+        this.className = "";
+        this.text = "";
+        this.contentDescription = "";
+    }
+    
+    /**
+     * Get package name
+     * 
+     * @return Package name
+     */
+    public CharSequence getPackageName() {
+        return packageName;
+    }
+    
+    /**
+     * Set package name
+     * 
+     * @param packageName Package name
+     */
+    public void setPackageName(CharSequence packageName) {
+        this.packageName = packageName != null ? packageName.toString() : "";
+    }
+    
+    /**
+     * Get class name
+     * 
+     * @return Class name
+     */
+    public CharSequence getClassName() {
+        return className;
+    }
+    
+    /**
+     * Set class name
+     * 
+     * @param className Class name
+     */
+    public void setClassName(CharSequence className) {
+        this.className = className != null ? className.toString() : "";
+    }
+    
+    /**
+     * Get text
+     * 
+     * @return Text
+     */
+    public CharSequence getText() {
+        return text;
+    }
+    
+    /**
+     * Set text
+     * 
+     * @param text Text
+     */
+    public void setText(CharSequence text) {
+        this.text = text != null ? text.toString() : "";
+    }
+    
+    /**
+     * Get content description
+     * 
+     * @return Content description
+     */
+    public CharSequence getContentDescription() {
+        return contentDescription;
+    }
+    
+    /**
+     * Set content description
+     * 
+     * @param contentDescription Content description
+     */
+    public void setContentDescription(CharSequence contentDescription) {
+        this.contentDescription = contentDescription != null ? contentDescription.toString() : "";
+    }
+    
+    /**
+     * Check if this node is clickable
+     * 
+     * @return True if clickable
+     */
+    public boolean isClickable() {
+        return false; // Default implementation
+    }
+    
+    /**
+     * Check if this node is focusable
+     * 
+     * @return True if focusable
+     */
+    public boolean isFocusable() {
+        return false; // Default implementation
+    }
+    
+    /**
+     * Get child node at index
+     * 
+     * @param index Child index
+     * @return Child node or null
+     */
+    public AccessibilityNodeInfo getChild(int index) {
+        return null; // Default implementation
+    }
+    
+    /**
+     * Get child count
+     * 
+     * @return Number of children
+     */
+    public int getChildCount() {
+        return 0; // Default implementation
+    }
+    
+    /**
+     * Recycle this node
+     * This is required in Android to prevent memory leaks
+     */
+    public void recycle() {
+        // No-op in this mock implementation
+    }
+}

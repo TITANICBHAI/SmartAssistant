@@ -1,0 +1,87 @@
+package com.aiassistant.utils;
+
+import com.aiassistant.core.AIController;
+import com.aiassistant.models.StandardizedGameType;
+
+/**
+ * Converter for game type enums
+ */
+public class GameTypeConverter {
+    
+    /**
+     * Convert from AIController.GameType to StandardizedGameType
+     * 
+     * @param gameType Original game type
+     * @return Standardized game type
+     */
+    public static StandardizedGameType fromAIControllerGameType(AIController.GameType gameType) {
+        if (gameType == null) {
+            return StandardizedGameType.UNKNOWN;
+        }
+        
+        switch (gameType) {
+            case PUBG_MOBILE:
+                return StandardizedGameType.PUBG_MOBILE;
+            case FREE_FIRE:
+                return StandardizedGameType.FREE_FIRE;
+            case FPS:
+                return StandardizedGameType.FPS;
+            case CLASH_OF_CLANS:
+                return StandardizedGameType.CLASH_OF_CLANS;
+            case STRATEGY:
+                return StandardizedGameType.STRATEGY;
+            case POKEMON_UNITE:
+                return StandardizedGameType.POKEMON_UNITE;
+            case MOBA:
+                return StandardizedGameType.MOBA;
+            case RPG:
+                return StandardizedGameType.RPG;
+            case OTHER:
+            default:
+                return StandardizedGameType.UNKNOWN;
+        }
+    }
+    
+    /**
+     * Convert from StandardizedGameType to AIController.GameType
+     * 
+     * @param gameType Standardized game type
+     * @return Original AIController game type
+     */
+    public static AIController.GameType toAIControllerGameType(StandardizedGameType gameType) {
+        if (gameType == null) {
+            return AIController.GameType.OTHER;
+        }
+        
+        switch (gameType) {
+            case PUBG_MOBILE:
+                return AIController.GameType.PUBG_MOBILE;
+            case FREE_FIRE:
+                return AIController.GameType.FREE_FIRE;
+            case FPS:
+                return AIController.GameType.FPS;
+            case CLASH_OF_CLANS:
+                return AIController.GameType.CLASH_OF_CLANS;
+            case STRATEGY:
+                return AIController.GameType.STRATEGY;
+            case POKEMON_UNITE:
+                return AIController.GameType.POKEMON_UNITE;
+            case MOBA:
+                return AIController.GameType.MOBA;
+            case RPG:
+                return AIController.GameType.RPG;
+            default:
+                return AIController.GameType.OTHER;
+        }
+    }
+    
+    /**
+     * Convert from package name to StandardizedGameType
+     * 
+     * @param packageName Application package name
+     * @return Standardized game type
+     */
+    public static StandardizedGameType fromPackageName(String packageName) {
+        return fromAIControllerGameType(AIController.GameType.fromPackageName(packageName));
+    }
+}

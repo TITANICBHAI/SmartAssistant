@@ -1,0 +1,287 @@
+package com.aiassistant.services;
+
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
+import android.util.Log;
+
+import models.TaskInfo;
+import models.TaskStatus;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Service for scheduling and executing tasks.
+ * This service manages task scheduling, persistence, and execution.
+ */
+public class TaskSchedulerService {
+    private static final String TAG = "TaskSchedulerService";
+    private static TaskSchedulerService instance;
+
+    private final Context context;
+    private final Map<String, TaskInfo> taskMap;
+    private AlarmManager alarmManager;
+
+    /**
+     * Gets the singleton instance of TaskSchedulerService.
+     *
+     * @param context The context
+     * @return The TaskSchedulerService instance
+     */
+    public static synchronized TaskSchedulerService getInstance(Context context) {
+        if (instance == null) {
+            instance = new TaskSchedulerService(context.getApplicationContext());
+        }
+        return instance;
+    }
+
+    /**
+     * Private constructor to enforce singleton pattern.
+     *
+     * @param context The application context
+     */
+    private TaskSchedulerService(Context context) {
+        this.context = context;
+        this.taskMap = new HashMap<>();
+        this.alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        
+        // Load saved tasks (implement persistence later)
+        loadTasks();
+    }
+
+    /**
+     * Adds a new task.
+     *
+     * @param task The task to add
+     * @return True if the task was added successfully
+     */
+    public boolean addTask(TaskInfo task) {
+        if (task == null || task.getName() == null || task.getName().isEmpty()) {
+            Log.e(TAG, "Cannot add task: task is null or has no name");
+            return false;
+        }
+
+        // Add task to memory map
+        taskMap.put(task.getId(), task);
+        
+        // Schedule the task if it's not ONCE or if it's in the future
+        if (task.getScheduleType() != com.aiassistant.models.TaskScheduleType.ONCE || 
+                (task.getScheduledDate() != null && task.getScheduledDate().after(new Date()))) {
+            scheduleTask(task);
+        }
+        
+        // Save tasks (implement persistence later)
+        saveTasks();
+        
+        return true;
+    }
+
+    /**
+     * Updates an existing task.
+     *
+     * @param task The updated task
+     * @return True if the task was updated successfully
+     */
+    public boolean updateTask(TaskInfo task) {
+        if (task == null || task.getId() == null || !taskMap.containsKey(task.getId())) {
+            Log.e(TAG, "Cannot update task: task is null or doesn't exist");
+            return false;
+        }
+
+        // Cancel existing schedule
+        cancelTaskSchedule(task.getId());
+        
+        // Update task in memory map
+        taskMap.put(task.getId(), task);
+        
+        // Reschedule the task if needed
+        if (task.isEnabled() && task.getStatus() != TaskStatus.COMPLETED && 
+                task.getStatus() != TaskStatus.CANCELLED) {
+            scheduleTask(task);
+        }
+        
+        // Save tasks (implement persistence later)
+        saveTasks();
+        
+        return true;
+    }
+
+    /**
+     * Deletes an existing task.
+     *
+     * @param taskId The ID of the task to delete
+     * @return True if the task was deleted successfully
+     */
+    public boolean deleteTask(String taskId) {
+        if (taskId == null || !taskMap.containsKey(taskId)) {
+            Log.e(TAG, "Cannot delete task: task ID is null or doesn't exist");
+            return false;
+        }
+
+        // Cancel existing schedule
+        cancelTaskSchedule(taskId);
+        
+        // Remove task from memory map
+        taskMap.remove(taskId);
+        
+        // Save tasks (implement persistence later)
+        saveTasks();
+        
+        return true;
+    }
+
+    /**
+     * Gets a task by ID.
+     *
+     * @param taskId The ID of the task to get
+     * @return The task, or null if not found
+     */
+    public TaskInfo getTask(String taskId) {
+        return taskMap.get(taskId);
+    }
+
+    /**
+     * Gets all tasks.
+     *
+     * @return A list of all tasks
+     */
+    public List<TaskInfo> getAllTasks() {
+        List<TaskInfo> taskList = new ArrayList<>(taskMap.values());
+        
+        // Sort by priority (highest first), then by scheduled date (soonest first)
+        Collections.sort(taskList, (task1, task2) -> {
+            // First sort by priority (highest first)
+            int priorityCompare = Integer.compare(
+                    task2.getPriority().getValue(), 
+                    task1.getPriority().getValue());
+            
+            if (priorityCompare != 0) {
+                return priorityCompare;
+            }
+            
+            // Then sort by scheduled date (soonest first)
+            if (task1.getScheduledDate() == null && task2.getScheduledDate() == null) {
+                return 0;
+            } else if (task1.getScheduledDate() == null) {
+                return 1;
+            } else if (task2.getScheduledDate() == null) {
+                return -1;
+            } else {
+                return task1.getScheduledDate().compareTo(task2.getScheduledDate());
+            }
+        });
+        
+        return taskList;
+    }
+
+    /**
+     * Executes a task by ID.
+     *
+     * @param taskId The ID of the task to execute
+     * @return True if the task execution started successfully
+     */
+    public boolean executeTask(String taskId) {
+        TaskInfo task = taskMap.get(taskId);
+        if (task == null) {
+            Log.e(TAG, "Cannot execute task: task doesn't exist");
+            return false;
+        }
+        
+        // Check if task can be executed
+        if (task.getStatus() == TaskStatus.RUNNING) {
+            Log.e(TAG, "Cannot execute task: task is already running");
+            return false;
+        }
+        
+        if (!task.isEnabled()) {
+            Log.e(TAG, "Cannot execute task: task is disabled");
+            return false;
+        }
+        
+        // Execute the task in a background thread
+        executeTaskInBackground(task);
+        
+        return true;
+    }
+
+    /**
+     * Executes a task in the background.
+     *
+     * @param task The task to execute
+     */
+    private void executeTaskInBackground(TaskInfo task) {
+        // Update task status
+        task.setStatus(TaskStatus.RUNNING);
+        task.setLastExecutedAt(new Date());
+        saveTasks();
+        
+        // TODO: Implement task execution with SecurityBypassManager
+        // For now, just simulate a successful execution
+        
+        // Use a simple thread for now, would use a WorkManager in production
+        new Thread(() -> {
+            try {
+                // Simulate task execution
+                Thread.sleep(2000);
+                
+                // Update task status
+                task.setStatus(TaskStatus.COMPLETED);
+                saveTasks();
+                
+                // Log completion
+                Log.d(TAG, "Task executed successfully: " + task.getName());
+                
+            } catch (Exception e) {
+                Log.e(TAG, "Error executing task: " + e.getMessage());
+                
+                // Update task status
+                task.setStatus(TaskStatus.FAILED);
+                saveTasks();
+            }
+        }).start();
+    }
+
+    /**
+     * Schedules a task using the AlarmManager.
+     *
+     * @param task The task to schedule
+     */
+    private void scheduleTask(TaskInfo task) {
+        // TODO: Implement proper scheduling logic
+        Log.d(TAG, "Scheduled task: " + task.getName());
+    }
+
+    /**
+     * Cancels a scheduled task.
+     *
+     * @param taskId The ID of the task to cancel
+     */
+    private void cancelTaskSchedule(String taskId) {
+        // TODO: Implement proper cancellation logic
+        Log.d(TAG, "Cancelled task schedule: " + taskId);
+    }
+
+    /**
+     * Saves tasks to persistent storage.
+     */
+    private void saveTasks() {
+        // TODO: Implement persistence
+        Log.d(TAG, "Saved " + taskMap.size() + " tasks");
+    }
+
+    /**
+     * Loads tasks from persistent storage.
+     */
+    private void loadTasks() {
+        // TODO: Implement persistence
+        Log.d(TAG, "Loaded tasks from storage");
+    }
+}

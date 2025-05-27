@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen 
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- AI Behavior Section -->
+    <androidx.preference.PreferenceCategory
+        android:title="@string/pref_category_ai_behavior"
+        android:icon="@drawable/ic_ai">
+
+        <androidx.preference.ListPreference
+            android:key="ai_mode"
+            android:title="@string/pref_ai_mode_title"
+            android:summary="@string/pref_ai_mode_summary"
+            android:defaultValue="balanced"
+            android:entries="@array/ai_mode_entries"
+            android:entryValues="@array/ai_mode_values"
+            app:singleLineTitle="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="enable_learning"
+            android:title="@string/pref_learning_title"
+            android:summary="@string/pref_learning_summary"
+            android:defaultValue="true"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="background_service"
+            android:title="@string/pref_background_service_title"
+            android:summary="@string/pref_background_service_summary"
+            android:defaultValue="true"
+            app:singleLineTitle="false" />
+    </androidx.preference.PreferenceCategory>
+
+    <!-- Permission Settings -->
+    <androidx.preference.PreferenceCategory
+        android:title="@string/pref_category_permissions"
+        android:icon="@drawable/ic_permission">
+
+        <androidx.preference.Preference
+            android:key="accessibility_permission"
+            android:title="@string/pref_accessibility_title"
+            android:summary="@string/pref_accessibility_summary"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.Preference
+            android:key="overlay_permission"
+            android:title="@string/pref_overlay_title"
+            android:summary="@string/pref_overlay_summary"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.Preference
+            android:key="admin_permission"
+            android:title="@string/pref_device_admin_title"
+            android:summary="@string/pref_device_admin_summary"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.Preference
+            android:key="usage_stats_permission"
+            android:title="@string/pref_usage_stats_title"
+            android:summary="@string/pref_usage_stats_summary"
+            app:singleLineTitle="false" />
+    </androidx.preference.PreferenceCategory>
+
+    <!-- Performance Settings -->
+    <androidx.preference.PreferenceCategory
+        android:title="@string/pref_category_performance"
+        android:icon="@drawable/ic_performance">
+
+        <androidx.preference.Preference
+            android:key="disable_battery_optimization"
+            android:title="@string/pref_battery_optimization_title"
+            android:summary="@string/pref_battery_optimization_summary"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="low_power_mode"
+            android:title="@string/pref_low_power_mode_title"
+            android:summary="@string/pref_low_power_mode_summary"
+            android:defaultValue="false"
+            app:singleLineTitle="false" />
+    </androidx.preference.PreferenceCategory>
+
+    <!-- Privacy Settings -->
+    <androidx.preference.PreferenceCategory
+        android:title="@string/pref_category_privacy"
+        android:icon="@drawable/ic_privacy">
+
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="privacy_mode"
+            android:title="@string/pref_privacy_mode_title"
+            android:summary="@string/pref_privacy_mode_summary"
+            android:defaultValue="false"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.Preference
+            android:key="clear_data"
+            android:title="@string/pref_clear_data_title"
+            android:summary="@string/pref_clear_data_summary"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.Preference
+            android:key="export_data"
+            android:title="@string/pref_export_data_title"
+            android:summary="@string/pref_export_data_summary"
+            app:singleLineTitle="false" />
+    </androidx.preference.PreferenceCategory>
+
+    <!-- Advanced Settings -->
+    <androidx.preference.PreferenceCategory
+        android:title="@string/pref_category_advanced"
+        android:icon="@drawable/ic_advanced">
+
+        <androidx.preference.Preference
+            android:key="reset_ai"
+            android:title="@string/pref_reset_ai_title"
+            android:summary="@string/pref_reset_ai_summary"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="developer_mode"
+            android:title="@string/pref_developer_mode_title"
+            android:summary="@string/pref_developer_mode_summary"
+            android:defaultValue="false"
+            app:singleLineTitle="false" />
+    </androidx.preference.PreferenceCategory>
+
+    <!-- About -->
+    <androidx.preference.PreferenceCategory
+        android:title="@string/pref_category_about"
+        android:icon="@drawable/ic_info">
+
+        <androidx.preference.Preference
+            android:key="version"
+            android:title="@string/pref_version_title"
+            android:summary="@string/app_version"
+            app:singleLineTitle="false" />
+
+        <androidx.preference.Preference
+            android:key="licenses"
+            android:title="@string/pref_licenses_title"
+            android:summary="@string/pref_licenses_summary"
+            app:singleLineTitle="false" />
+    </androidx.preference.PreferenceCategory>
+
+</androidx.preference.PreferenceScreen>

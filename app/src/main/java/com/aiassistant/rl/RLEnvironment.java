@@ -1,0 +1,322 @@
+package com.aiassistant.rl;
+
+import android.graphics.PointF;
+import android.util.Log;
+
+import com.aiassistant.core.AIController;
+import models.Action;
+import models.ActionType;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Reinforcement learning environment interface
+ * Maps generic RL actions to app-specific actions
+ */
+public class RLEnvironment {
+    private static final String TAG = "RLEnvironment";
+    
+    private String packageName;
+    private AIController.GameType gameType;
+    private int actionSize;
+    
+    // Action mapping
+    private List<Action> actionMapping;
+    
+    /**
+     * Initialize RL environment
+     */
+    public RLEnvironment(String packageName, AIController.GameType gameType, int actionSize) {
+        this.packageName = packageName;
+        this.gameType = gameType;
+        this.actionSize = actionSize;
+        
+        // Create action mapping
+        initializeActionMapping();
+    }
+    
+    /**
+     * Initialize action mapping based on game type
+     */
+    private void initializeActionMapping() {
+        actionMapping = new ArrayList<>();
+        
+        // Create different action sets based on game type
+        switch (gameType) {
+            case PUBG_MOBILE:
+            case FREE_FIRE:
+            case FPS:
+                initializeFPSActions();
+                break;
+                
+            case CLASH_OF_CLANS:
+            case STRATEGY:
+                initializeStrategyActions();
+                break;
+                
+            case POKEMON_UNITE:
+            case MOBA:
+                initializeMOBAActions();
+                break;
+                
+            case RPG:
+                initializeRPGActions();
+                break;
+                
+            default:
+                initializeBasicActions();
+                break;
+        }
+        
+        // Ensure we have correct action size
+        while (actionMapping.size() < actionSize) {
+            // Add no-op action
+            Map<String, Object> params = new HashMap<>();
+            params.put("duration_ms", 100);
+            actionMapping.add(new Action(ActionType.WAIT, params));
+        }
+        
+        // Trim if needed
+        while (actionMapping.size() > actionSize) {
+            actionMapping.remove(actionMapping.size() - 1);
+        }
+    }
+    
+    /**
+     * Initialize FPS game actions
+     */
+    private void initializeFPSActions() {
+        // Tap center for shooting
+        Map<String, Object> shootParams = new HashMap<>();
+        shootParams.put("control_type", "click");
+        shootParams.put("x", 960);
+        shootParams.put("y", 540);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, shootParams));
+        
+        // Swipe for aiming (right)
+        Map<String, Object> aimRightParams = new HashMap<>();
+        aimRightParams.put("control_type", "swipe");
+        aimRightParams.put("startX", 960);
+        aimRightParams.put("startY", 540);
+        aimRightParams.put("endX", 1160);
+        aimRightParams.put("endY", 540);
+        aimRightParams.put("duration", 100);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, aimRightParams));
+        
+        // Swipe for aiming (left)
+        Map<String, Object> aimLeftParams = new HashMap<>();
+        aimLeftParams.put("control_type", "swipe");
+        aimLeftParams.put("startX", 960);
+        aimLeftParams.put("startY", 540);
+        aimLeftParams.put("endX", 760);
+        aimLeftParams.put("endY", 540);
+        aimLeftParams.put("duration", 100);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, aimLeftParams));
+        
+        // Swipe for movement (forward)
+        Map<String, Object> moveForwardParams = new HashMap<>();
+        moveForwardParams.put("control_type", "swipe");
+        moveForwardParams.put("startX", 300);
+        moveForwardParams.put("startY", 600);
+        moveForwardParams.put("endX", 300);
+        moveForwardParams.put("endY", 400);
+        moveForwardParams.put("duration", 100);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, moveForwardParams));
+        
+        // Swipe for movement (backward)
+        Map<String, Object> moveBackwardParams = new HashMap<>();
+        moveBackwardParams.put("control_type", "swipe");
+        moveBackwardParams.put("startX", 300);
+        moveBackwardParams.put("startY", 600);
+        moveBackwardParams.put("endX", 300);
+        moveBackwardParams.put("endY", 800);
+        moveBackwardParams.put("duration", 100);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, moveBackwardParams));
+    }
+    
+    /**
+     * Initialize strategy game actions
+     */
+    private void initializeStrategyActions() {
+        // Tap center
+        Map<String, Object> tapCenterParams = new HashMap<>();
+        tapCenterParams.put("control_type", "click");
+        tapCenterParams.put("x", 960);
+        tapCenterParams.put("y", 540);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, tapCenterParams));
+        
+        // Tap corners
+        for (int x = 300; x <= 1620; x += 660) {
+            for (int y = 200; y <= 880; y += 680) {
+                Map<String, Object> tapParams = new HashMap<>();
+                tapParams.put("control_type", "click");
+                tapParams.put("x", x);
+                tapParams.put("y", y);
+                actionMapping.add(new Action(ActionType.APP_CONTROL, tapParams));
+            }
+        }
+        
+        // Scroll gestures
+        Map<String, Object> scrollParams = new HashMap<>();
+        scrollParams.put("control_type", "swipe");
+        scrollParams.put("startX", 960);
+        scrollParams.put("startY", 540);
+        scrollParams.put("endX", 760);
+        scrollParams.put("endY", 340);
+        scrollParams.put("duration", 300);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, scrollParams));
+    }
+    
+    /**
+     * Initialize MOBA game actions
+     */
+    private void initializeMOBAActions() {
+        // Basic attack
+        Map<String, Object> attackParams = new HashMap<>();
+        attackParams.put("control_type", "click");
+        attackParams.put("x", 1600);
+        attackParams.put("y", 750);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, attackParams));
+        
+        // Skill 1
+        Map<String, Object> skill1Params = new HashMap<>();
+        skill1Params.put("control_type", "click");
+        skill1Params.put("x", 1450);
+        skill1Params.put("y", 600);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, skill1Params));
+        
+        // Skill 2
+        Map<String, Object> skill2Params = new HashMap<>();
+        skill2Params.put("control_type", "click");
+        skill2Params.put("x", 1600);
+        skill2Params.put("y", 500);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, skill2Params));
+        
+        // Movement
+        for (int x = 200; x <= 600; x += 200) {
+            for (int y = 400; y <= 800; y += 200) {
+                Map<String, Object> moveParams = new HashMap<>();
+                moveParams.put("control_type", "click");
+                moveParams.put("x", x);
+                moveParams.put("y", y);
+                actionMapping.add(new Action(ActionType.APP_CONTROL, moveParams));
+            }
+        }
+    }
+    
+    /**
+     * Initialize RPG game actions
+     */
+    private void initializeRPGActions() {
+        // Attack
+        Map<String, Object> attackParams = new HashMap<>();
+        attackParams.put("control_type", "click");
+        attackParams.put("x", 1700);
+        attackParams.put("y", 800);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, attackParams));
+        
+        // Skills
+        for (int i = 0; i < 3; i++) {
+            Map<String, Object> skillParams = new HashMap<>();
+            skillParams.put("control_type", "click");
+            skillParams.put("x", 1500 + i * 100);
+            skillParams.put("y", 700);
+            actionMapping.add(new Action(ActionType.APP_CONTROL, skillParams));
+        }
+        
+        // Movement
+        Map<String, Object> moveParams = new HashMap<>();
+        moveParams.put("control_type", "swipe");
+        moveParams.put("startX", 300);
+        moveParams.put("startY", 800);
+        moveParams.put("endX", 400);
+        moveParams.put("endY", 700);
+        moveParams.put("duration", 200);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, moveParams));
+        
+        // Interact
+        Map<String, Object> interactParams = new HashMap<>();
+        interactParams.put("control_type", "click");
+        interactParams.put("x", 1800);
+        interactParams.put("y", 200);
+        actionMapping.add(new Action(ActionType.APP_CONTROL, interactParams));
+    }
+    
+    /**
+     * Initialize basic actions for unknown game types
+     */
+    private void initializeBasicActions() {
+        // Grid of 3x3 taps covering screen
+        for (int x = 480; x <= 1440; x += 480) {
+            for (int y = 360; y <= 1080; y += 360) {
+                Map<String, Object> tapParams = new HashMap<>();
+                tapParams.put("control_type", "click");
+                tapParams.put("x", x);
+                tapParams.put("y", y);
+                actionMapping.add(new Action(ActionType.APP_CONTROL, tapParams));
+            }
+        }
+        
+        // Basic swipes
+        String[] directions = {"right", "left", "up", "down"};
+        PointF[] starts = {
+            new PointF(480, 540),
+            new PointF(1440, 540),
+            new PointF(960, 1080),
+            new PointF(960, 360)
+        };
+        PointF[] ends = {
+            new PointF(1440, 540),
+            new PointF(480, 540),
+            new PointF(960, 360),
+            new PointF(960, 1080)
+        };
+        
+        for (int i = 0; i < directions.length; i++) {
+            Map<String, Object> swipeParams = new HashMap<>();
+            swipeParams.put("control_type", "swipe");
+            swipeParams.put("startX", (int) starts[i].x);
+            swipeParams.put("startY", (int) starts[i].y);
+            swipeParams.put("endX", (int) ends[i].x);
+            swipeParams.put("endY", (int) ends[i].y);
+            swipeParams.put("duration", 200);
+            actionMapping.add(new Action(ActionType.APP_CONTROL, swipeParams));
+        }
+    }
+    
+    /**
+     * Get action from index
+     */
+    public Action getActionFromIndex(int index) {
+        if (index < 0 || index >= actionMapping.size()) {
+            Log.e(TAG, "Invalid action index: " + index + ", max is " + (actionMapping.size() - 1));
+            return null;
+        }
+        
+        return actionMapping.get(index);
+    }
+    
+    /**
+     * Get package name
+     */
+    public String getPackageName() {
+        return packageName;
+    }
+    
+    /**
+     * Get game type
+     */
+    public AIController.GameType getGameType() {
+        return gameType;
+    }
+    
+    /**
+     * Get action size
+     */
+    public int getActionSize() {
+        return actionSize;
+    }
+}

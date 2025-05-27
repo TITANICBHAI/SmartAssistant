@@ -1,0 +1,702 @@
+package com.aiassistant.core;
+
+import android.content.Context;
+import android.util.Log;
+
+import com.aiassistant.ml.ActionSuggestion;
+import com.aiassistant.ml.PredictiveActionSystem;
+import com.aiassistant.models.AppInfo;
+import com.aiassistant.scheduler.executor.ActionHandler;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Central controller for the AI assistant
+ */
+public class AIController {
+    
+    private static final String TAG = "AIController";
+    
+    public enum Mode {
+        INACTIVE,
+        PASSIVE,
+        ACTIVE,
+        GAMING,
+        LEARNING
+    }
+    
+    /**
+     * Enum of supported game types
+     */
+    public enum GameType {
+        PUBG_MOBILE,
+        FREE_FIRE,
+        FPS,
+        CLASH_OF_CLANS,
+        STRATEGY,
+        POKEMON_UNITE,
+        MOBA,
+        RPG,
+        OTHER;
+        
+        /**
+         * Get game type from package name
+         */
+        public static GameType fromPackageName(String packageName) {
+            if (packageName == null) {
+                return OTHER;
+            }
+            
+            packageName = packageName.toLowerCase();
+            
+            if (packageName.contains("pubg") || packageName.contains("playerunknown")) {
+                return PUBG_MOBILE;
+            } else if (packageName.contains("freefire") || packageName.contains("garena")) {
+                return FREE_FIRE;
+            } else if (packageName.contains("clash") && packageName.contains("clans")) {
+                return CLASH_OF_CLANS;
+            } else if (packageName.contains("pokemon") && packageName.contains("unite")) {
+                return POKEMON_UNITE;
+            } else if (packageName.contains("mobilelegends") || packageName.contains("league") || 
+                    packageName.contains("dota") || packageName.contains("vainglory")) {
+                return MOBA;
+            } else if (packageName.contains("fps") || packageName.contains("shooter") || 
+                    packageName.contains("gun") || packageName.contains("strike") || 
+                    packageName.contains("battle") || packageName.contains("callofduty") || 
+                    packageName.contains("cod")) {
+                return FPS;
+            } else if (packageName.contains("rpg") || packageName.contains("role") || 
+                    packageName.contains("genshin") || packageName.contains("fantasy")) {
+                return RPG;
+            } else if (packageName.contains("strategy") || packageName.contains("tower") || 
+                    packageName.contains("command") || packageName.contains("empire") || 
+                    packageName.contains("royal")) {
+                return STRATEGY;
+            }
+            
+            return OTHER;
+        }
+    }
+    
+    private static volatile AIController instance;
+    
+    private final Context applicationContext;
+    private final ExecutorService executorService;
+    private final Map<String, ActionHandler> actionHandlers;
+    private final List<AIControllerListener> listeners;
+    
+    private Mode currentMode;
+    private boolean initialized;
+    private PredictiveActionSystem predictiveSystem;
+    private AppInfo currentApp;
+    private boolean gameMode;
+    
+    /**
+     * Interface for AI controller event listeners
+     */
+    public interface AIControllerListener {
+        void onModeChanged(Mode newMode);
+        void onSuggestionsAvailable(List<com.aiassistant.ml.ActionSuggestion> suggestions);
+        void onActionExecuted(String actionId, boolean success);
+        void onError(String errorMessage);
+    }
+    
+    /**
+     * Get singleton instance
+     * 
+     * @param context Application context
+     * @return AIController instance
+     */
+    public static AIController getInstance(Context context) {
+        if (instance == null) {
+            synchronized (AIController.class) {
+                if (instance == null) {
+                    instance = new AIController(context.getApplicationContext());
+                }
+            }
+        }
+        return instance;
+    }
+    
+    /**
+     * Private constructor
+     * 
+     * @param applicationContext Application context
+     */
+    private AIController(Context applicationContext) {
+        this.applicationContext = applicationContext;
+        this.executorService = Executors.newCachedThreadPool();
+        this.actionHandlers = new HashMap<>();
+        this.listeners = new CopyOnWriteArrayList<>();
+        this.currentMode = Mode.INACTIVE;
+        this.initialized = false;
+        this.gameMode = false;
+    }
+    
+    /**
+     * Initialize the AI controller
+     * 
+     * @return true if initialization was successful
+     */
+    public boolean initialize() {
+        if (initialized) {
+            return true;
+        }
+        
+        try {
+            Log.i(TAG, "Initializing AI controller");
+            
+            // Create predictive system
+            try {
+                // Try to use the constructor with context and AIController
+                predictiveSystem = new PredictiveActionSystem(applicationContext, this);
+                predictiveSystem.initialize();
+            } catch (NoSuchMethodError | IllegalArgumentException e) {
+                // Fallback to alternate constructor if the primary one fails
+                Log.w(TAG, "Using fallback constructor for PredictiveActionSystem", e);
+                predictiveSystem = new PredictiveActionSystem(applicationContext);
+                // Try to initialize if method exists
+                try {
+                    predictiveSystem.initialize();
+                } catch (NoSuchMethodError initError) {
+                    // Method may not exist in all implementations, ignore
+                    Log.w(TAG, "initialize() method not available in PredictiveActionSystem", initError);
+                }
+            }
+            
+            // Register for prediction events
+            // Instead of using PredictiveActionSystem.SuggestionListener which might not exist,
+            // we'll implement our own suggestion handling directly in AIController
+            
+            try {
+                // Register our controller as a callback handler in some way
+                // This approach depends on which method is available in the implementation
+                if (predictiveSystem instanceof com.aiassistant.ml.PredictiveActionSystem) {
+                    // Create a method to handle the suggestions directly
+                    setupDirectSuggestionCallback();
+                } else {
+                    // For alternative implementations, we'll need to create our own callback mechanism
+                    Log.i(TAG, "Using alternative suggestion callback mechanism");
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Could not set up suggestion callback", e);
+            }
+            
+            // Set initial mode
+            setMode(Mode.PASSIVE);
+            
+            initialized = true;
+            Log.i(TAG, "AI controller initialized successfully");
+            return true;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error initializing AI controller", e);
+            notifyError("Failed to initialize AI controller: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Register a listener for AI controller events
+     * 
+     * @param listener Listener to register
+     */
+    public void addListener(AIControllerListener listener) {
+        if (listener != null && !listeners.contains(listener)) {
+            listeners.add(listener);
+        }
+    }
+    
+    /**
+     * Unregister a listener
+     * 
+     * @param listener Listener to unregister
+     */
+    public void removeListener(AIControllerListener listener) {
+        listeners.remove(listener);
+    }
+    
+    /**
+     * Register an action handler
+     * 
+     * @param handlerType Handler type
+     * @param handler Action handler implementation
+     */
+    public void registerActionHandler(String handlerType, ActionHandler handler) {
+        if (handlerType != null && !handlerType.isEmpty() && handler != null) {
+            actionHandlers.put(handlerType, handler);
+        }
+    }
+    
+    /**
+     * Get current operation mode
+     * 
+     * @return Current mode
+     */
+    public Mode getMode() {
+        return currentMode;
+    }
+    
+    /**
+     * Set operation mode
+     * 
+     * @param mode New mode
+     */
+    public void setMode(Mode mode) {
+        if (mode == null || mode == currentMode) {
+            return;
+        }
+        
+        Mode oldMode = currentMode;
+        currentMode = mode;
+        
+        // Special handling for game mode
+        if (mode == Mode.GAMING) {
+            gameMode = true;
+        } else {
+            gameMode = false;
+        }
+        
+        Log.i(TAG, "Mode changed from " + oldMode + " to " + currentMode);
+        
+        // Notify listeners
+        for (AIControllerListener listener : listeners) {
+            listener.onModeChanged(currentMode);
+        }
+    }
+    
+    /**
+     * Check if initialized
+     * 
+     * @return true if initialized
+     */
+    public boolean isInitialized() {
+        return initialized;
+    }
+    
+    /**
+     * Check if in game mode
+     * 
+     * @return true if in game mode
+     */
+    public boolean isGameMode() {
+        return gameMode || currentMode == Mode.GAMING;
+    }
+    
+    /**
+     * Set game mode
+     * 
+     * @param enabled Whether game mode should be enabled
+     */
+    public void setGameMode(boolean enabled) {
+        if (enabled != gameMode) {
+            gameMode = enabled;
+            
+            // Update mode if necessary
+            if (enabled && currentMode != Mode.GAMING) {
+                setMode(Mode.GAMING);
+            } else if (!enabled && currentMode == Mode.GAMING) {
+                setMode(Mode.ACTIVE);
+            }
+        }
+    }
+    
+    /**
+     * Get current app
+     * 
+     * @return Current app info or null if unknown
+     */
+    public AppInfo getCurrentApp() {
+        return currentApp;
+    }
+    
+    /**
+     * Set current app
+     * 
+     * @param appInfo Current app info
+     */
+    public void setCurrentApp(AppInfo appInfo) {
+        this.currentApp = appInfo;
+        
+        // Update game mode based on app
+        if (appInfo != null && appInfo.getGameType() != null) {
+            setGameMode(true);
+        }
+    }
+    
+    /**
+     * Get suggestions based on current state
+     */
+    public void getSuggestions() {
+        if (!initialized) {
+            if (!initialize()) {
+                return;
+            }
+        }
+        
+        // Skip if inactive
+        if (currentMode == Mode.INACTIVE) {
+            return;
+        }
+        
+        // Build context
+        Map<String, Object> contextData = new HashMap<>();
+        contextData.put("mode", currentMode.name());
+        contextData.put("gameMode", gameMode);
+        
+        // Get suggestions
+        try {
+            // Check which implementation we're using and call appropriate method
+            if (predictiveSystem instanceof com.aiassistant.ml.PredictiveActionSystem) {
+                // Use reflection to safely call the method if it exists
+                try {
+                    java.lang.reflect.Method getSuggestionsMethod = 
+                        predictiveSystem.getClass().getMethod("getSuggestions", 
+                            AppInfo.class, Map.class);
+                    getSuggestionsMethod.invoke(predictiveSystem, currentApp, contextData);
+                } catch (NoSuchMethodException e) {
+                    Log.w(TAG, "getSuggestions(AppInfo, Map) not found, trying alternatives", e);
+                    
+                    // Try alternative approach like direct access to methods
+                    // For now, we'll just log the failure
+                    Log.e(TAG, "Could not find appropriate getSuggestions method");
+                }
+            } else {
+                // Generic fallback to whatever implementation is available
+                try {
+                    predictiveSystem.getClass().getMethod("start").invoke(predictiveSystem);
+                    Log.i(TAG, "Called start() on predictive system as fallback");
+                } catch (Exception e) {
+                    Log.w(TAG, "Could not call start() either", e);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting suggestions", e);
+            notifyError("Failed to get suggestions: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Execute an action suggestion
+     * 
+     * @param suggestion Action suggestion to execute
+     * @return true if execution started
+     */
+    public boolean executeAction(com.aiassistant.ml.ActionSuggestion suggestion) {
+        if (suggestion == null) {
+            return false;
+        }
+        
+        String actionType = null;
+        
+        switch (suggestion.getType()) {
+            case SYSTEM_ACTION:
+                actionType = "system_action";
+                break;
+            case API_CALL:
+                actionType = "api_call";
+                break;
+            case EMAIL:
+                actionType = "email";
+                break;
+            case APP_LAUNCH:
+            case APP_ACTION:
+                actionType = "app_control";
+                break;
+            case NOTIFICATION:
+                actionType = "notification";
+                break;
+            case CUSTOM:
+                actionType = "custom";
+                break;
+        }
+        
+        if (actionType == null) {
+            notifyError("Unknown action type: " + suggestion.getType());
+            return false;
+        }
+        
+        final ActionHandler handler = actionHandlers.get(actionType);
+        
+        if (handler == null) {
+            notifyError("No handler registered for action type: " + actionType);
+            return false;
+        }
+        
+        final String actionId = suggestion.getId();
+        final Map<String, Object> params = suggestion.getParameters();
+        
+        executorService.execute(() -> {
+            boolean success = false;
+            
+            try {
+                success = handler.executeAction(params);
+                
+                // Mark as executed
+                suggestion.markExecuted();
+                
+                // Notify listeners
+                notifyActionExecuted(actionId, success);
+                
+            } catch (Exception e) {
+                Log.e(TAG, "Error executing action", e);
+                notifyError("Failed to execute action: " + e.getMessage());
+                notifyActionExecuted(actionId, false);
+            }
+        });
+        
+        return true;
+    }
+    
+    /**
+     * Notify listeners of new suggestions
+     */
+    private void notifySuggestionsAvailable(List<com.aiassistant.ml.ActionSuggestion> suggestions) {
+        for (AIControllerListener listener : listeners) {
+            listener.onSuggestionsAvailable(suggestions);
+        }
+    }
+    
+    /**
+     * Notify listeners of action execution
+     */
+    private void notifyActionExecuted(String actionId, boolean success) {
+        for (AIControllerListener listener : listeners) {
+            listener.onActionExecuted(actionId, success);
+        }
+    }
+    
+    /**
+     * Notify listeners of error
+     */
+    private void notifyError(String errorMessage) {
+        for (AIControllerListener listener : listeners) {
+            listener.onError(errorMessage);
+        }
+    }
+    
+    /**
+     * Callback interface for action completion or failure
+     */
+    public interface ActionCallback {
+        void onComplete(Map<String, Object> result);
+        void onError(String errorMessage);
+    }
+    
+    /**
+     * Performs a click action at the specified coordinates
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return true if action was performed successfully
+     */
+    public boolean clickAction(int x, int y) {
+        Log.d(TAG, "Performing click action at " + x + ", " + y);
+        // Implementation would interact with system input service
+        return true;
+    }
+    
+    /**
+     * Performs a click action at the specified coordinates with callback
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @param callback Callback for completion or error
+     * @return true if action was started successfully
+     */
+    public boolean clickAction(int x, int y, ActionCallback callback) {
+        boolean result = clickAction(x, y);
+        
+        if (callback != null) {
+            if (result) {
+                Map<String, Object> resultData = new HashMap<>();
+                resultData.put("x", x);
+                resultData.put("y", y);
+                callback.onComplete(resultData);
+            } else {
+                callback.onError("Failed to perform click action");
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Performs a long press action at the specified coordinates
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return true if action was performed successfully
+     */
+    public boolean longPressAction(int x, int y) {
+        Log.d(TAG, "Performing long press action at " + x + ", " + y);
+        // Implementation would interact with system input service
+        return true;
+    }
+    
+    /**
+     * Performs a long press action at the specified coordinates with callback
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @param callback Callback for completion or error
+     * @return true if action was started successfully
+     */
+    public boolean longPressAction(int x, int y, ActionCallback callback) {
+        boolean result = longPressAction(x, y);
+        
+        if (callback != null) {
+            if (result) {
+                Map<String, Object> resultData = new HashMap<>();
+                resultData.put("x", x);
+                resultData.put("y", y);
+                callback.onComplete(resultData);
+            } else {
+                callback.onError("Failed to perform long press action");
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Performs a swipe action between the specified coordinates
+     * 
+     * @param startX Starting X coordinate
+     * @param startY Starting Y coordinate
+     * @param endX Ending X coordinate
+     * @param endY Ending Y coordinate
+     * @param duration Duration of the swipe in milliseconds
+     * @return true if action was performed successfully
+     */
+    public boolean swipeAction(int startX, int startY, int endX, int endY, long duration) {
+        Log.d(TAG, "Performing swipe action from " + startX + "," + startY + " to " + endX + "," + endY);
+        // Implementation would interact with system input service
+        return true;
+    }
+    
+    /**
+     * Performs a swipe action between the specified coordinates with callback
+     * 
+     * @param startX Starting X coordinate
+     * @param startY Starting Y coordinate
+     * @param endX Ending X coordinate
+     * @param endY Ending Y coordinate
+     * @param duration Duration of the swipe in milliseconds
+     * @param callback Callback for completion or error
+     * @return true if action was started successfully
+     */
+    public boolean swipeAction(int startX, int startY, int endX, int endY, long duration, ActionCallback callback) {
+        boolean result = swipeAction(startX, startY, endX, endY, duration);
+        
+        if (callback != null) {
+            if (result) {
+                Map<String, Object> resultData = new HashMap<>();
+                resultData.put("startX", startX);
+                resultData.put("startY", startY);
+                resultData.put("endX", endX);
+                resultData.put("endY", endY);
+                resultData.put("duration", duration);
+                callback.onComplete(resultData);
+            } else {
+                callback.onError("Failed to perform swipe action");
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Sets up a callback to handle suggestions directly from PredictiveActionSystem
+     * This is a workaround for the missing SuggestionListener interface
+     */
+    private void setupDirectSuggestionCallback() {
+        try {
+            // If we're using the ML package version that supports PredictionCallback
+            if (predictiveSystem instanceof com.aiassistant.ml.PredictiveActionSystem) {
+                com.aiassistant.ml.PredictiveActionSystem mlSystem = 
+                    (com.aiassistant.ml.PredictiveActionSystem) predictiveSystem;
+                
+                // Try to register for action recommendations
+                try {
+                    // Use reflection to safely call registerCallback if it exists
+                    java.lang.reflect.Method registerMethod = 
+                        mlSystem.getClass().getMethod("registerCallback", 
+                            com.aiassistant.ml.PredictiveActionSystem.PredictionCallback.class);
+                    
+                    // Create an anonymous implementation of PredictionCallback
+                    Object callback = java.lang.reflect.Proxy.newProxyInstance(
+                        getClass().getClassLoader(),
+                        new Class<?>[] { com.aiassistant.ml.PredictiveActionSystem.PredictionCallback.class },
+                        (proxy, method, args) -> {
+                            // Handle callback methods
+                            String methodName = method.getName();
+                            if ("onActionRecommendation".equals(methodName) && args.length > 0) {
+                                // Convert GameAction to ActionSuggestion
+                                // For now, we'll just log it
+                                Log.d(TAG, "Action recommendation received");
+                                // In a real implementation, we would convert and notify listeners
+                            }
+                            return null;
+                        });
+                    
+                    // Register our callback
+                    registerMethod.invoke(mlSystem, callback);
+                    Log.d(TAG, "Registered prediction callback");
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to register prediction callback", e);
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error setting up suggestion callback", e);
+        }
+    }
+    
+    /**
+     * Release resources
+     */
+    public void release() {
+        if (predictiveSystem != null) {
+            try {
+                // Use reflection to safely call release if it exists
+                try {
+                    java.lang.reflect.Method releaseMethod = 
+                        predictiveSystem.getClass().getMethod("release");
+                    releaseMethod.invoke(predictiveSystem);
+                    Log.d(TAG, "Called release() on predictive system");
+                } catch (NoSuchMethodException e) {
+                    // Method doesn't exist, try alternatives
+                    Log.w(TAG, "release() method not found, trying alternatives", e);
+                    
+                    try {
+                        // Try stop() as an alternative
+                        predictiveSystem.getClass().getMethod("stop").invoke(predictiveSystem);
+                        Log.d(TAG, "Called stop() on predictive system as alternative");
+                    } catch (Exception ex) {
+                        // If no alternatives exist, just log it
+                        Log.w(TAG, "Could not find appropriate shutdown method", ex);
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error releasing predictive system", e);
+            } finally {
+                predictiveSystem = null;
+            }
+        }
+        
+        executorService.shutdown();
+        listeners.clear();
+        actionHandlers.clear();
+        initialized = false;
+        
+        synchronized (AIController.class) {
+            instance = null;
+        }
+    }
+}

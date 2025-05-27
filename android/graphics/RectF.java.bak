@@ -1,0 +1,121 @@
+package android.graphics;
+
+/**
+ * Mock implementation of Android's RectF class
+ * Represents a rectangle with float coordinates
+ */
+public class RectF {
+    public float left;
+    public float top;
+    public float right;
+    public float bottom;
+    
+    /**
+     * Default constructor, creates an empty rectangle
+     */
+    public RectF() {
+        this.left = 0.0f;
+        this.top = 0.0f;
+        this.right = 0.0f;
+        this.bottom = 0.0f;
+    }
+    
+    /**
+     * Create a rectangle with coordinates
+     * 
+     * @param left Left coordinate
+     * @param top Top coordinate
+     * @param right Right coordinate
+     * @param bottom Bottom coordinate
+     */
+    public RectF(float left, float top, float right, float bottom) {
+        this.left = left;
+        this.top = top;
+        this.right = right;
+        this.bottom = bottom;
+    }
+    
+    /**
+     * Copy constructor
+     * 
+     * @param src Source rectangle
+     */
+    public RectF(RectF src) {
+        this.left = src.left;
+        this.top = src.top;
+        this.right = src.right;
+        this.bottom = src.bottom;
+    }
+    
+    /**
+     * Create from Rect
+     * 
+     * @param r Integer rectangle
+     */
+    public RectF(Rect r) {
+        this.left = r.left;
+        this.top = r.top;
+        this.right = r.right;
+        this.bottom = r.bottom;
+    }
+    
+    /**
+     * Round to Rect
+     * 
+     * @param dst Destination rectangle
+     */
+    public void round(Rect dst) {
+        dst.left = Math.round(left);
+        dst.top = Math.round(top);
+        dst.right = Math.round(right);
+        dst.bottom = Math.round(bottom);
+    }
+    
+    /**
+     * Check if rectangle is empty
+     * 
+     * @return True if empty
+     */
+    public boolean isEmpty() {
+        return left >= right || top >= bottom;
+    }
+    
+    /**
+     * Get width of rectangle
+     * 
+     * @return Width
+     */
+    public float width() {
+        return right - left;
+    }
+    
+    /**
+     * Get height of rectangle
+     * 
+     * @return Height
+     */
+    public float height() {
+        return bottom - top;
+    }
+    
+    /**
+     * Check if a point is inside the rectangle
+     * 
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return True if point is inside
+     */
+    public boolean contains(float x, float y) {
+        return left < right && top < bottom && x >= left && x < right && y >= top && y < bottom;
+    }
+    
+    /**
+     * String representation
+     * 
+     * @return Rectangle as string
+     */
+    @Override
+    public String toString() {
+        return "RectF(" + left + ", " + top + ", " + right + ", " + bottom + ")";
+    }
+}

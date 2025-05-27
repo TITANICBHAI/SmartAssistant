@@ -1,0 +1,116 @@
+package utils;
+
+import android.graphics.Rect;
+import java.util.Map;
+
+/**
+ * Interface for UI elements for cross-platform compatibility.
+ */
+public interface UIElement {
+    /**
+     * Get the element's ID
+     * @return The element ID
+     */
+    String getId();
+    
+    /**
+     * Get the element's text content
+     * @return The text content
+     */
+    String getText();
+    
+    /**
+     * Get the element's bounding rectangle
+     * @return The bounding rectangle
+     */
+    Rect getBounds();
+    
+    /**
+     * Set the element's bounding rectangle
+     * @param bounds The new bounding rectangle
+     */
+    void setBounds(Rect bounds);
+    
+    /**
+     * Get the X coordinate of the element
+     * @return The X coordinate
+     */
+    int getX();
+    
+    /**
+     * Get the Y coordinate of the element
+     * @return The Y coordinate
+     */
+    int getY();
+    
+    /**
+     * Get the width of the element
+     * @return The width
+     */
+    int getWidth();
+    
+    /**
+     * Get the height of the element
+     * @return The height
+     */
+    int getHeight();
+    
+    /**
+     * Check if the element is clickable
+     * @return True if clickable, false otherwise
+     */
+    boolean isClickable();
+    
+    /**
+     * Set whether the element is clickable
+     * @param clickable The clickable state
+     */
+    void setClickable(boolean clickable);
+    
+    /**
+     * Get the element's type
+     * @return The element type as a string
+     */
+    String getType();
+    
+    /**
+     * Set the element's type
+     * @param type The element type
+     */
+    void setType(String type);
+    
+    /**
+     * Get all attributes as a map
+     * @return The attributes map
+     */
+    Map<String, Object> getAttributes();
+    
+    /**
+     * Set an attribute value
+     * @param key The attribute key
+     * @param value The attribute value
+     */
+    void setAttribute(String key, Object value);
+    
+    /**
+     * Get an attribute value
+     * @param key The attribute key
+     * @return The attribute value or null if not found
+     */
+    Object getAttribute(String key);
+    
+    /**
+     * Check if this element contains the specified point
+     * @param x The X coordinate
+     * @param y The Y coordinate
+     * @return True if the element contains the point, false otherwise
+     */
+    boolean contains(int x, int y);
+    
+    /**
+     * Check if this element intersects with another element
+     * @param element The other element
+     * @return True if they intersect, false otherwise
+     */
+    boolean intersects(UIElement element);
+}

@@ -1,0 +1,194 @@
+package com.aiassistant.ui.dialogs;
+
+import android.app.Dialog;
+import android.os.Bundle;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.Spinner;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
+import androidx.fragment.app.DialogFragment;
+
+import com.aiassistant.R;
+import models.ScheduledTask;
+import models.TaskPriority;
+import models.TaskTriggerType;
+import models.TaskType;
+
+import java.util.UUID;
+
+/**
+ * Dialog for creating new scheduled tasks
+ */
+public class NewTaskDialog extends DialogFragment {
+    private EditText editTaskName;
+    private EditText editTaskDescription;
+    private Spinner spinnerTaskType;
+    private Spinner spinnerTaskTrigger;
+    private Spinner spinnerTaskPriority;
+    private EditText editTaskTargetApp;
+    private EditText editTaskAction;
+    
+    private TaskCreationListener listener;
+    
+    public interface TaskCreationListener {
+        void onTaskCreated(ScheduledTask task);
+    }
+    
+    public void setTaskCreationListener(TaskCreationListener listener) {
+        this.listener = listener;
+    }
+    
+    @NonNull
+    @Override
+    public Dialog onCreateDialog(@Nullable Bundle savedInstanceState) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
+        LayoutInflater inflater = requireActivity().getLayoutInflater();
+        View view = inflater.inflate(R.layout.dialog_new_task, null);
+        
+        // Initialize views
+        initializeViews(view);
+        
+        // Set up spinners
+        setupSpinners();
+        
+        // Build the dialog
+        builder.setView(view)
+                .setTitle("New Task")
+                .setPositiveButton("Create", null) // Set later to prevent auto-dismissal
+                .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss());
+        
+        AlertDialog dialog = builder.create();
+        
+        // Set positive button click listener manually to prevent auto-dismissal on validation errors
+        dialog.setOnShowListener(dialogInterface -> {
+            Button button = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            button.setOnClickListener(v -> {
+                if (validateInputs()) {
+                    createTask();
+                    dialog.dismiss();
+                }
+            });
+        });
+        
+        return dialog;
+    }
+    
+    private void initializeViews(View view) {
+        editTaskName = view.findViewById(R.id.edit_task_name);
+        editTaskDescription = view.findViewById(R.id.edit_task_description);
+        spinnerTaskType = view.findViewById(R.id.spinner_task_type);
+        spinnerTaskTrigger = view.findViewById(R.id.spinner_task_trigger);
+        spinnerTaskPriority = view.findViewById(R.id.spinner_task_priority);
+        editTaskTargetApp = view.findViewById(R.id.edit_task_target_app);
+        editTaskAction = view.findViewById(R.id.edit_task_action);
+    }
+    
+    private void setupSpinners() {
+        // Task type spinner
+        ArrayAdapter<CharSequence> typeAdapter = ArrayAdapter.createFromResource(
+                requireContext(),
+                R.array.task_types,
+                android.R.layout.simple_spinner_item
+        );
+        typeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerTaskType.setAdapter(typeAdapter);
+        
+        // Task trigger spinner
+        ArrayAdapter<CharSequence> triggerAdapter = ArrayAdapter.createFromResource(
+                requireContext(),
+                R.array.task_triggers,
+                android.R.layout.simple_spinner_item
+        );
+        triggerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerTaskTrigger.setAdapter(triggerAdapter);
+        
+        // Task priority spinner
+        ArrayAdapter<CharSequence> priorityAdapter = ArrayAdapter.createFromResource(
+                requireContext(),
+                R.array.task_priorities,
+                android.R.layout.simple_spinner_item
+        );
+        priorityAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerTaskPriority.setAdapter(priorityAdapter);
+    }
+    
+    private boolean validateInputs() {
+        // Check task name
+        if (editTaskName.getText().toString().trim().isEmpty()) {
+            Toast.makeText(requireContext(), "Task name cannot be empty", Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        
+        // Check task action
+        if (editTaskAction.getText().toString().trim().isEmpty()) {
+            Toast.makeText(requireContext(), "Task action cannot be empty", Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        
+        // Add more validation as needed
+        
+        return true;
+    }
+    
+    private void createTask() {
+        // Get values from inputs
+        String name = editTaskName.getText().toString().trim();
+        String description = editTaskDescription.getText().toString().trim();
+        String targetApp = editTaskTargetApp.getText().toString().trim();
+        String action = editTaskAction.getText().toString().trim();
+        
+        // Get selected task type
+        TaskType taskType = TaskType.APP_CONTROL; // Default
+        String selectedType = spinnerTaskType.getSelectedItem().toString();
+        for (TaskType type : TaskType.values()) {
+            if (type.name().equals(selectedType)) {
+                taskType = type;
+                break;
+            }
+        }
+        
+        // Get selected trigger type
+        TaskTriggerType triggerType = TaskTriggerType.MANUAL; // Default
+        String selectedTrigger = spinnerTaskTrigger.getSelectedItem().toString();
+        for (TaskTriggerType trigger : TaskTriggerType.values()) {
+            if (trigger.name().equals(selectedTrigger)) {
+                triggerType = trigger;
+                break;
+            }
+        }
+        
+        // Get selected priority
+        TaskPriority priority = TaskPriority.MEDIUM; // Default
+        String selectedPriority = spinnerTaskPriority.getSelectedItem().toString();
+        for (TaskPriority pri : TaskPriority.values()) {
+            if (pri.name().equals(selectedPriority)) {
+                priority = pri;
+                break;
+            }
+        }
+        
+        // Create task
+        ScheduledTask task = new ScheduledTask();
+        task.setId(UUID.randomUUID().toString());
+        task.setName(name);
+        task.setDescription(description);
+        task.setTaskType(taskType);
+        task.setTriggerType(triggerType);
+        task.setPriority(priority);
+        task.setTargetAppPackage(targetApp);
+        task.setAction(action);
+        task.setEnabled(true);
+        
+        // Notify listener
+        if (listener != null) {
+            listener.onTaskCreated(task);
+        }
+    }
+}

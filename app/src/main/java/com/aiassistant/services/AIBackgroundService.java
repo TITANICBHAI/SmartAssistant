@@ -20,307 +20,411 @@ import androidx.preference.PreferenceManager;
 
 import com.aiassistant.MainActivity;
 import com.aiassistant.R;
+import com.aiassistant.core.AIController;
+import com.aiassistant.learning.LearningEngine;
+import com.aiassistant.monitoring.PerformanceMonitor;
+import com.aiassistant.monitoring.NetworkStateMonitor;
+import com.aiassistant.monitoring.SmartBatteryOptimizer;
+import com.aiassistant.scheduler.TaskSchedulerManager;
 import utils.PermissionManager;
 
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Background service for the AI Assistant
- * Handles continuous AI processing and learning in the background
+ * Background foreground service for the AI Assistant.
+ *
+ * Improvements over the original stub:
+ *  - initializeAIComponents() actually creates and starts AIController,
+ *    LearningEngine, TaskSchedulerManager, PerformanceMonitor,
+ *    NetworkStateMonitor, and SmartBatteryOptimizer.
+ *  - startAIProcessing() runs a real adaptive loop that varies its polling
+ *    frequency based on battery and performance state.
+ *  - executeTask() and stopTask() delegate to TaskSchedulerManager.
+ *  - updateAIMode() updates all live subsystems.
+ *  - cleanupAIComponents() properly shuts down each subsystem in order.
  */
 public class AIBackgroundService extends Service {
-    private static final String TAG = "AIBackgroundService";
-    private static final String CHANNEL_ID = "ai_assistant_channel";
-    private static final int FOREGROUND_NOTIFICATION_ID = 1001;
-    
+
+    private static final String TAG                    = "AIBackgroundService";
+    private static final String CHANNEL_ID             = "ai_assistant_channel";
+    private static final int    FOREGROUND_NOTIF_ID    = 1001;
+
+    // Polling intervals (ms)
+    private static final long POLL_ACTIVE_MS      =  1_000L;
+    private static final long POLL_BALANCED_MS    =  3_000L;
+    private static final long POLL_LOW_POWER_MS   = 10_000L;
+    private static final long POLL_LEARNING_MS    =  5_000L;
+
+    // -------------------------------------------------------------------------
+    // Binder
+    // -------------------------------------------------------------------------
+
+    public class LocalBinder extends Binder {
+        public AIBackgroundService getService() { return AIBackgroundService.this; }
+    }
+
     private final IBinder binder = new LocalBinder();
+
+    // -------------------------------------------------------------------------
+    // State
+    // -------------------------------------------------------------------------
+
     private ExecutorService executorService;
     private PowerManager.WakeLock wakeLock;
-    private AtomicBoolean isRunning = new AtomicBoolean(false);
-    private String currentAIMode = "balanced";
-    private boolean lowPowerMode = false;
-    private boolean privacyMode = false;
-    
-    // Handler for various AI components
-    // These would be initialized in a real implementation
-    private Object learningSystem;
-    private Object taskScheduler;
-    private Object aiController;
-    
-    /**
-     * Class for clients to access the service
-     */
-    public class LocalBinder extends Binder {
-        public AIBackgroundService getService() {
-            return AIBackgroundService.this;
-        }
-    }
-    
+    private final AtomicBoolean isRunning    = new AtomicBoolean(false);
+
+    // Preferences
+    private String  currentAIMode  = "balanced";
+    private boolean lowPowerMode   = false;
+    private boolean privacyMode    = false;
+
+    // Subsystems
+    private AIController        aiController;
+    private LearningEngine      learningEngine;
+    private TaskSchedulerManager taskScheduler;
+    private PerformanceMonitor  performanceMonitor;
+    private NetworkStateMonitor  networkMonitor;
+    private SmartBatteryOptimizer batteryOptimizer;
+
+    // -------------------------------------------------------------------------
+    // Lifecycle
+    // -------------------------------------------------------------------------
+
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "Service created");
-        
-        // Create notification channel for foreground service
+        Log.i(TAG, "AIBackgroundService created");
+
         createNotificationChannel();
-        
-        // Initialize executor service for background tasks
-        executorService = Executors.newFixedThreadPool(2);
-        
-        // Acquire wake lock to keep CPU running
-        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
-                "AIAssistant:AIBackgroundService");
-        
-        // Load preferences
+        executorService = Executors.newFixedThreadPool(3);
+
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AIAssistant::BGService");
+
         loadPreferences();
-        
-        // Initialize AI components
         initializeAIComponents();
     }
-    
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.d(TAG, "Service started");
-        
+        Log.i(TAG, "AIBackgroundService started");
+
         if (intent != null && intent.getAction() != null) {
             handleCommandAction(intent);
         } else {
-            // Start the service in foreground with notification
-            startForeground(FOREGROUND_NOTIFICATION_ID, createNotification());
-            
-            // Start AI processing if not already running
+            startForeground(FOREGROUND_NOTIF_ID, createNotification());
             if (!isRunning.getAndSet(true)) {
                 startAIProcessing();
             }
         }
-        
-        // Return sticky so the service restarts if killed
         return START_STICKY;
     }
-    
+
     @Nullable
     @Override
-    public IBinder onBind(Intent intent) {
-        return binder;
-    }
-    
+    public IBinder onBind(Intent intent) { return binder; }
+
     @Override
     public void onDestroy() {
-        Log.d(TAG, "Service destroyed");
-        
-        // Stop AI processing
+        Log.i(TAG, "AIBackgroundService destroying");
         isRunning.set(false);
-        
-        // Release wake lock
-        if (wakeLock != null && wakeLock.isHeld()) {
-            wakeLock.release();
-        }
-        
-        // Shutdown executor service
+
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (executorService != null) {
             executorService.shutdown();
+            try { executorService.awaitTermination(3, TimeUnit.SECONDS); }
+            catch (InterruptedException ignored) {}
         }
-        
-        // Clean up AI components
+
         cleanupAIComponents();
-        
         super.onDestroy();
     }
-    
-    /**
-     * Handle command actions sent to the service
-     */
+
+    // -------------------------------------------------------------------------
+    // Command routing
+    // -------------------------------------------------------------------------
+
     private void handleCommandAction(Intent intent) {
         String action = intent.getAction();
-        
+        if (action == null) return;
         switch (action) {
             case "UPDATE_AI_MODE":
                 String newMode = intent.getStringExtra("mode");
-                if (newMode != null) {
-                    updateAIMode(newMode);
-                } else {
-                    // If no mode specified, reload from preferences
-                    loadPreferences();
-                }
+                updateAIMode(newMode != null ? newMode : currentAIMode);
                 break;
-                
             case "START_TASK":
-                String taskId = intent.getStringExtra("task_id");
-                if (taskId != null) {
-                    executeTask(taskId);
-                }
+                String startId = intent.getStringExtra("task_id");
+                if (startId != null) executeTask(startId);
                 break;
-                
             case "STOP_TASK":
-                String stopTaskId = intent.getStringExtra("task_id");
-                if (stopTaskId != null) {
-                    stopTask(stopTaskId);
-                }
+                String stopId = intent.getStringExtra("task_id");
+                if (stopId != null) stopTask(stopId);
                 break;
-                
             case "UPDATE_SETTINGS":
                 loadPreferences();
+                applyPreferencesToSubsystems();
                 break;
-                
             case "STOP_SERVICE":
                 stopSelf();
                 break;
         }
     }
-    
-    /**
-     * Create notification channel for Android O and above
-     */
+
+    // -------------------------------------------------------------------------
+    // Notification helpers
+    // -------------------------------------------------------------------------
+
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID,
-                    "AI Assistant Service",
-                    NotificationManager.IMPORTANCE_LOW);
-            
-            channel.setDescription("Background AI processing");
-            channel.enableVibration(false);
-            channel.setSound(null, null);
-            
-            NotificationManager notificationManager = getSystemService(NotificationManager.class);
-            notificationManager.createNotificationChannel(channel);
+            NotificationChannel ch = new NotificationChannel(
+                    CHANNEL_ID, "AI Assistant Service", NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("Background AI processing");
+            ch.enableVibration(false);
+            ch.setSound(null, null);
+            getSystemService(NotificationManager.class).createNotificationChannel(ch);
         }
     }
-    
-    /**
-     * Create foreground service notification
-     */
+
     private Notification createNotification() {
-        Intent notificationIntent = new Intent(this, MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-                this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
-        
+        Intent mainIntent = new Intent(this, MainActivity.class);
+        PendingIntent pi   = PendingIntent.getActivity(this, 0, mainIntent,
+                PendingIntent.FLAG_IMMUTABLE);
+        String modeText = "Mode: " + currentAIMode + (lowPowerMode ? " [battery saver]" : "");
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(getString(R.string.app_name))
-                .setContentText("AI Assistant is running")
+                .setContentText(modeText)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentIntent(pendingIntent)
+                .setContentIntent(pi)
                 .setOngoing(true)
                 .build();
     }
-    
-    /**
-     * Load user preferences
-     */
+
+    private void updateNotification() {
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm != null) nm.notify(FOREGROUND_NOTIF_ID, createNotification());
+    }
+
+    // -------------------------------------------------------------------------
+    // Preferences
+    // -------------------------------------------------------------------------
+
     private void loadPreferences() {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        
         currentAIMode = prefs.getString("ai_mode", "balanced");
-        lowPowerMode = prefs.getBoolean("low_power_mode", false);
-        privacyMode = prefs.getBoolean("privacy_mode", false);
-        
-        Log.d(TAG, "Loaded preferences: mode=" + currentAIMode +
-                ", lowPower=" + lowPowerMode +
-                ", privacy=" + privacyMode);
+        lowPowerMode  = prefs.getBoolean("low_power_mode", false);
+        privacyMode   = prefs.getBoolean("privacy_mode", false);
+        Log.d(TAG, "Preferences: mode=" + currentAIMode +
+                ", lowPower=" + lowPowerMode + ", privacy=" + privacyMode);
     }
-    
-    /**
-     * Initialize AI components
-     */
+
+    private void applyPreferencesToSubsystems() {
+        if (batteryOptimizer != null) batteryOptimizer.setLowPowerOverride(lowPowerMode);
+        if (learningEngine   != null) learningEngine.setLowPowerMode(lowPowerMode);
+        if (aiController     != null) {
+            switch (currentAIMode) {
+                case "gaming":   aiController.setMode(AIController.Mode.GAMING);   break;
+                case "learning": aiController.setMode(AIController.Mode.LEARNING); break;
+                case "passive":  aiController.setMode(AIController.Mode.PASSIVE);  break;
+                default:         aiController.setMode(AIController.Mode.ACTIVE);   break;
+            }
+        }
+        updateNotification();
+    }
+
+    // -------------------------------------------------------------------------
+    // AI component lifecycle
+    // -------------------------------------------------------------------------
+
     private void initializeAIComponents() {
-        // In a real implementation, initialize learning system, controllers, etc.
-        Log.d(TAG, "Initializing AI components");
-        
-        // Acquire wake lock if needed
-        if (!wakeLock.isHeld()) {
-            wakeLock.acquire();
+        Log.i(TAG, "Initializing AI components");
+
+        try {
+            // 1. Performance monitor (first — others query it)
+            performanceMonitor = new PerformanceMonitor(getApplicationContext());
+            performanceMonitor.start();
+
+            // 2. Battery optimizer
+            batteryOptimizer = new SmartBatteryOptimizer(getApplicationContext());
+            batteryOptimizer.setLowPowerOverride(lowPowerMode);
+
+            // 3. Network monitor
+            networkMonitor = new NetworkStateMonitor(getApplicationContext());
+            networkMonitor.start();
+
+            // 4. Learning engine
+            learningEngine = new LearningEngine(getApplicationContext());
+            learningEngine.setLowPowerMode(lowPowerMode);
+
+            // 5. Task scheduler
+            taskScheduler = new TaskSchedulerManager(getApplicationContext());
+            taskScheduler.start();
+
+            // 6. Central AI controller
+            aiController = AIController.getInstance(getApplicationContext());
+            aiController.initialize();
+            aiController.startSuggestionPolling();
+
+            // Apply current preferences
+            applyPreferencesToSubsystems();
+
+            // Acquire partial wake-lock
+            if (!wakeLock.isHeld()) wakeLock.acquire();
+
+            Log.i(TAG, "All AI components initialized successfully");
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error initializing AI components", e);
         }
     }
-    
-    /**
-     * Clean up AI components
-     */
+
     private void cleanupAIComponents() {
-        // In a real implementation, clean up learning system, controllers, etc.
-        Log.d(TAG, "Cleaning up AI components");
+        Log.i(TAG, "Cleaning up AI components");
+
+        if (aiController != null) {
+            try { aiController.stopSuggestionPolling(); } catch (Exception ignored) {}
+        }
+        if (taskScheduler != null) {
+            try { taskScheduler.stop(); } catch (Exception ignored) {}
+        }
+        if (networkMonitor != null) {
+            try { networkMonitor.stop(); } catch (Exception ignored) {}
+        }
+        if (performanceMonitor != null) {
+            try { performanceMonitor.stop(); } catch (Exception ignored) {}
+        }
+        // batteryOptimizer and learningEngine are passive — no teardown needed
     }
-    
-    /**
-     * Start AI processing in the background
-     */
+
+    // -------------------------------------------------------------------------
+    // AI processing loop
+    // -------------------------------------------------------------------------
+
     private void startAIProcessing() {
-        Log.d(TAG, "Starting AI processing in mode: " + currentAIMode);
-        
-        executorService.execute(new Runnable() {
-            @Override
-            public void run() {
+        Log.i(TAG, "Starting AI processing loop in mode: " + currentAIMode);
+
+        executorService.execute(() -> {
+            while (isRunning.get()) {
                 try {
-                    // In a real implementation, this would be a continuous processing loop
-                    while (isRunning.get()) {
-                        // Process AI tasks, check for user patterns, etc.
-                        
-                        // Sleep to reduce resource usage
-                        Thread.sleep(lowPowerMode ? 5000 : 1000);
+                    long sleepMs = computePollInterval();
+                    Thread.sleep(sleepMs);
+
+                    if (!isRunning.get()) break;
+
+                    // Tick the learning engine with current performance data
+                    if (learningEngine != null && performanceMonitor != null) {
+                        Map<String, Object> perfSnapshot = performanceMonitor.getSnapshot();
+                        if (!perfSnapshot.isEmpty()) {
+                            learningEngine.processScreenAnalysis(perfSnapshot);
+                        }
                     }
+
+                    // Let battery optimizer advise whether to throttle
+                    boolean throttle = batteryOptimizer != null && batteryOptimizer.shouldThrottle();
+                    if (throttle) {
+                        Log.d(TAG, "Battery optimizer: throttling AI processing");
+                        continue;
+                    }
+
+                    // Trigger suggestions if in active/gaming/learning mode
+                    if (aiController != null) {
+                        AIController.Mode mode = aiController.getMode();
+                        if (mode == AIController.Mode.ACTIVE   ||
+                            mode == AIController.Mode.GAMING   ||
+                            mode == AIController.Mode.LEARNING) {
+                            aiController.getSuggestions();
+                        }
+                    }
+
                 } catch (InterruptedException e) {
-                    Log.e(TAG, "AI processing interrupted", e);
                     Thread.currentThread().interrupt();
+                    break;
                 } catch (Exception e) {
-                    Log.e(TAG, "Error in AI processing", e);
+                    Log.e(TAG, "Error in AI processing loop", e);
                 }
             }
+            Log.i(TAG, "AI processing loop exited");
         });
     }
-    
-    /**
-     * Update AI operating mode
-     */
-    private void updateAIMode(String mode) {
-        Log.d(TAG, "Updating AI mode to: " + mode);
-        currentAIMode = mode;
-        
-        // In a real implementation, notify AI components of mode change
+
+    /** Determines the current poll interval based on mode and battery. */
+    private long computePollInterval() {
+        if (batteryOptimizer != null && batteryOptimizer.isCriticalBattery()) {
+            return POLL_LOW_POWER_MS;
+        }
+        if (lowPowerMode) return POLL_LOW_POWER_MS;
+        switch (currentAIMode) {
+            case "active":   return POLL_ACTIVE_MS;
+            case "learning": return POLL_LEARNING_MS;
+            case "passive":  return POLL_LOW_POWER_MS;
+            default:         return POLL_BALANCED_MS;
+        }
     }
-    
-    /**
-     * Execute a scheduled task
-     */
+
+    // -------------------------------------------------------------------------
+    // Task management
+    // -------------------------------------------------------------------------
+
+    private void updateAIMode(String mode) {
+        Log.i(TAG, "Updating AI mode to: " + mode);
+        currentAIMode = mode;
+        applyPreferencesToSubsystems();
+    }
+
     private void executeTask(String taskId) {
         Log.d(TAG, "Executing task: " + taskId);
-        
-        // In a real implementation, retrieve task definition and execute
+        if (taskScheduler != null) {
+            com.aiassistant.scheduler.model.ScheduledTask task = taskScheduler.getTask(taskId);
+            if (task != null) {
+                // Re-schedule immediately with current time
+                task.setScheduledTime(new java.util.Date());
+                taskScheduler.scheduleTask(task);
+            }
+        }
     }
-    
-    /**
-     * Stop a running task
-     */
+
     private void stopTask(String taskId) {
         Log.d(TAG, "Stopping task: " + taskId);
-        
-        // In a real implementation, find and stop the running task
+        if (taskScheduler != null) taskScheduler.cancelTask(taskId);
     }
-    
-    /**
-     * Public API for binding clients to update service settings
-     */
+
+    // -------------------------------------------------------------------------
+    // Public API (for bound clients)
+    // -------------------------------------------------------------------------
+
     public void setLowPowerMode(boolean enabled) {
         lowPowerMode = enabled;
+        applyPreferencesToSubsystems();
         Log.d(TAG, "Low power mode set to: " + enabled);
     }
-    
-    /**
-     * Public API for binding clients to update privacy settings
-     */
+
     public void setPrivacyMode(boolean enabled) {
         privacyMode = enabled;
+        AIAccessibilityService svc = AIAccessibilityService.getInstance();
+        if (svc != null) svc.setPrivacyMode(enabled);
         Log.d(TAG, "Privacy mode set to: " + enabled);
     }
-    
-    /**
-     * Check if service has all required permissions
-     */
+
     public boolean hasRequiredPermissions() {
-        PermissionManager permissionManager = new PermissionManager(this);
-        return permissionManager.hasAccessibilityPermission() &&
-               permissionManager.hasOverlayPermission() &&
-               permissionManager.hasUsageStatsPermission();
+        PermissionManager pm = new PermissionManager(this);
+        return pm.hasAccessibilityPermission() &&
+               pm.hasOverlayPermission()       &&
+               pm.hasUsageStatsPermission();
+    }
+
+    public Map<String, Object> getStatusSnapshot() {
+        java.util.HashMap<String, Object> status = new java.util.HashMap<>();
+        status.put("mode", currentAIMode);
+        status.put("lowPower", lowPowerMode);
+        status.put("privacy", privacyMode);
+        if (performanceMonitor != null) status.putAll(performanceMonitor.getSnapshot());
+        if (batteryOptimizer   != null) status.put("batteryThrottle", batteryOptimizer.shouldThrottle());
+        if (taskScheduler      != null) status.put("pendingTasks",
+                taskScheduler.getTasksByStatus(
+                        com.aiassistant.scheduler.model.TaskStatus.PENDING).size());
+        return status;
     }
 }

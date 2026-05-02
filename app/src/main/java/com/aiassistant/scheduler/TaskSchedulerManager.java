@@ -6,6 +6,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import android.content.Intent;
+import android.content.IntentFilter;
+
 import utils.ActionExecutor;
 import com.aiassistant.scheduler.model.Action;
 import com.aiassistant.scheduler.model.ActionSequence;
@@ -14,6 +17,7 @@ import com.aiassistant.scheduler.model.ScheduledTask;
 import com.aiassistant.scheduler.model.TaskPriority;
 import com.aiassistant.scheduler.model.TaskStatus;
 import com.aiassistant.scheduler.model.Trigger;
+import com.aiassistant.scheduler.model.TriggerType;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -679,39 +683,215 @@ public class TaskSchedulerManager {
     }
     
     /**
-     * Evaluate a trigger
+     * Evaluate a trigger against real system state.
+     *
+     * Supported trigger types:
+     *  IMMEDIATE     — always fires.
+     *  SCHEDULED     — fires when the task's scheduledTime has passed (already
+     *                  checked by the caller, so return true here).
+     *  APP_LAUNCH    — fires when the foreground package matches "package_name".
+     *  APP_EXIT      — fires when the foreground package does NOT match "package_name".
+     *  BATTERY       — fires when battery level is above/below "level".
+     *  CONNECTIVITY  — fires when network type matches "type" (wifi/cellular/none).
+     *  SCREEN_STATE  — fires when screen is on/off, matching "state" (on/off).
+     *  TIME_RANGE    — fires when current hour:minute is within [start_hour:start_minute,
+     *                  end_hour:end_minute].
+     *  DATA_CONDITION — delegates to the trigger's embedded Condition object.
+     *  Custom / others — evaluate the trigger's embedded Condition or return true.
      */
     private boolean evaluateTrigger(Trigger trigger) {
-        if (trigger == null) {
-            return true;
-        }
-        
+        if (trigger == null || trigger.getTriggerType() == null) return true;
+
         try {
-            // In a real implementation, this would check the trigger against current state
-            // For this simplified version, we'll just return true
-            return true;
+            TriggerType type = trigger.getTriggerType();
+
+            switch (type) {
+
+                case IMMEDIATE:
+                case SCHEDULED:
+                    return true;
+
+                case APP_LAUNCH: {
+                    String requiredPkg = (String) trigger.getParameter("package_name");
+                    if (requiredPkg == null || requiredPkg.isEmpty()) return true;
+                    com.aiassistant.services.AIAccessibilityService svc =
+                            com.aiassistant.services.AIAccessibilityService.getInstance();
+                    if (svc == null) return false;
+                    return requiredPkg.equals(svc.getCurrentPackageName());
+                }
+
+                case APP_EXIT: {
+                    String blockedPkg = (String) trigger.getParameter("package_name");
+                    if (blockedPkg == null || blockedPkg.isEmpty()) return true;
+                    com.aiassistant.services.AIAccessibilityService svc =
+                            com.aiassistant.services.AIAccessibilityService.getInstance();
+                    if (svc == null) return true;
+                    return !blockedPkg.equals(svc.getCurrentPackageName());
+                }
+
+                case BATTERY: {
+                    int    requiredLevel = getIntParam(trigger, "level", 20);
+                    boolean checkBelow  = getBoolParam(trigger, "below", true);
+                    int    currentLevel = getBatteryLevel();
+                    return checkBelow ? currentLevel <= requiredLevel
+                                     : currentLevel >= requiredLevel;
+                }
+
+                case CONNECTIVITY: {
+                    String requiredType = (String) trigger.getParameter("type");
+                    if (requiredType == null) return true;
+                    com.aiassistant.monitoring.NetworkStateMonitor.NetworkState ns =
+                            getNetworkState();
+                    if (ns == null) return false;
+                    switch (requiredType.toLowerCase()) {
+                        case "wifi":     return ns.type ==
+                                com.aiassistant.monitoring.NetworkStateMonitor.ConnectionType.WIFI;
+                        case "cellular": return ns.type ==
+                                com.aiassistant.monitoring.NetworkStateMonitor.ConnectionType.CELLULAR;
+                        case "connected": return ns.isConnected;
+                        case "none":
+                        case "offline":  return !ns.isConnected;
+                        default:         return ns.isConnected;
+                    }
+                }
+
+                case SCREEN_STATE: {
+                    String reqState = (String) trigger.getParameter("state");
+                    android.os.PowerManager pm = (android.os.PowerManager)
+                            context.getSystemService(Context.POWER_SERVICE);
+                    boolean screenOn = pm != null && pm.isInteractive();
+                    if ("off".equalsIgnoreCase(reqState)) return !screenOn;
+                    return screenOn; // default: "on"
+                }
+
+                case TIME_RANGE: {
+                    int startH = getIntParam(trigger, "start_hour",   0);
+                    int startM = getIntParam(trigger, "start_minute",  0);
+                    int endH   = getIntParam(trigger, "end_hour",     23);
+                    int endM   = getIntParam(trigger, "end_minute",   59);
+                    java.util.Calendar cal = java.util.Calendar.getInstance();
+                    int nowH = cal.get(java.util.Calendar.HOUR_OF_DAY);
+                    int nowM = cal.get(java.util.Calendar.MINUTE);
+                    int nowMins   = nowH * 60 + nowM;
+                    int startMins = startH * 60 + startM;
+                    int endMins   = endH * 60 + endM;
+                    if (startMins <= endMins) {
+                        return nowMins >= startMins && nowMins <= endMins;
+                    } else {
+                        // Crosses midnight
+                        return nowMins >= startMins || nowMins <= endMins;
+                    }
+                }
+
+                case DATA_CONDITION: {
+                    Condition embedded = trigger.getCondition();
+                    if (embedded == null) return true;
+                    return evaluateCondition(embedded);
+                }
+
+                default:
+                    // Unknown trigger — check embedded condition or pass
+                    Condition embedded = trigger.getCondition();
+                    return embedded == null || evaluateCondition(embedded);
+            }
+
         } catch (Exception e) {
             Log.e(TAG, "Error evaluating trigger: " + e.getMessage(), e);
             return false;
         }
     }
-    
+
     /**
-     * Evaluate a condition
+     * Evaluate a condition by building a real context map from system state
+     * and delegating to {@link Condition#evaluate(Map)}.
      */
     private boolean evaluateCondition(Condition condition) {
-        if (condition == null) {
-            return true;
-        }
-        
+        if (condition == null) return true;
         try {
-            // In a real implementation, this would evaluate the condition
-            // For this simplified version, we'll just return true
-            return true;
+            Map<String, Object> ctx = buildConditionContext();
+            return condition.evaluate(ctx);
         } catch (Exception e) {
             Log.e(TAG, "Error evaluating condition: " + e.getMessage(), e);
             return false;
         }
+    }
+
+    /** Assembles a context map with real system values for condition evaluation. */
+    private Map<String, Object> buildConditionContext() {
+        Map<String, Object> ctx = new HashMap<>();
+
+        // Battery
+        ctx.put("battery_level", getBatteryLevel());
+
+        // Network
+        com.aiassistant.monitoring.NetworkStateMonitor.NetworkState ns = getNetworkState();
+        ctx.put("network_connected", ns != null && ns.isConnected);
+        ctx.put("network_type",      ns != null ? ns.type.name().toLowerCase() : "none");
+        ctx.put("network_metered",   ns != null && ns.isMetered);
+
+        // Screen
+        android.os.PowerManager pm = (android.os.PowerManager)
+                context.getSystemService(Context.POWER_SERVICE);
+        ctx.put("screen_on", pm != null && pm.isInteractive());
+
+        // Foreground app
+        com.aiassistant.services.AIAccessibilityService svc =
+                com.aiassistant.services.AIAccessibilityService.getInstance();
+        ctx.put("foreground_package", svc != null ? svc.getCurrentPackageName() : "");
+        ctx.put("last_interaction_ms",
+                svc != null ? svc.getLastInteractionTime() : 0L);
+
+        // Time
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        ctx.put("hour",    cal.get(java.util.Calendar.HOUR_OF_DAY));
+        ctx.put("minute",  cal.get(java.util.Calendar.MINUTE));
+        ctx.put("weekday", cal.get(java.util.Calendar.DAY_OF_WEEK));
+
+        // Running task count
+        ctx.put("running_task_count", runningTaskIds.size());
+
+        return ctx;
+    }
+
+    // -----------------------------------------------------------------------
+    // System state helpers
+    // -----------------------------------------------------------------------
+
+    private int getBatteryLevel() {
+        android.content.Intent bIntent = context.registerReceiver(
+                null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (bIntent == null) return 100;
+        int level = bIntent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+        int scale = bIntent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100);
+        return scale > 0 ? (int) (100f * level / scale) : level;
+    }
+
+    private com.aiassistant.monitoring.NetworkStateMonitor.NetworkState getNetworkState() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                    context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return null;
+            // Quick synchronous check using a temp monitor
+            com.aiassistant.monitoring.NetworkStateMonitor mon =
+                    new com.aiassistant.monitoring.NetworkStateMonitor(context);
+            return mon.getCurrentState();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private int getIntParam(Trigger t, String key, int def) {
+        Object v = t.getParameter(key);
+        if (v instanceof Number) return ((Number) v).intValue();
+        if (v instanceof String) { try { return Integer.parseInt((String) v); } catch (Exception ignored) {} }
+        return def;
+    }
+
+    private boolean getBoolParam(Trigger t, String key, boolean def) {
+        Object v = t.getParameter(key);
+        if (v instanceof Boolean) return (Boolean) v;
+        if (v instanceof String)  return Boolean.parseBoolean((String) v);
+        return def;
     }
     
     /**

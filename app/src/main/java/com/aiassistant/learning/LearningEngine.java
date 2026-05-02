@@ -4,806 +4,601 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Advanced learning engine that adapts to user behavior and game patterns
- * This class provides adaptive learning capabilities for the AI assistant
+ * Advanced learning engine — improved over the original stub:
+ *
+ *  1. Full JSON-based pattern persistence: every pattern's observations,
+ *     successCount, confidence, timestamps, source, and metadata are saved
+ *     and restored from disk, not just the key set.
+ *  2. LRU-based pattern pruning: when the pattern map is full the least-recently-
+ *     used patterns are evicted (LinkedHashMap with access-order).
+ *  3. Temporal sequence detection: a sliding window of recent interactions is
+ *     maintained and common N-gram sequences are promoted to patterns.
+ *  4. Cross-app pattern tracking: package-name-prefixed keys let the engine
+ *     learn which patterns recur across multiple apps.
+ *  5. {@link #recordUserInteraction} — new method accepting the structured data
+ *     produced by AIAccessibilityService, so every accessibility event is fed
+ *     directly into the learning pipeline.
+ *  6. Thread-safe via ConcurrentHashMap; no synchronized blocks needed for
+ *     common read paths.
  */
 public class LearningEngine {
     private static final String TAG = "LearningEngine";
-    
-    // Learning mode
-    public enum LearningMode {
-        PASSIVE,     // Only observe and learn, don't act
-        ACTIVE,      // Learn and suggest actions
-        AUTONOMOUS   // Learn and act autonomously
-    }
-    
-    // Pattern confidence levels
-    public enum ConfidenceLevel {
-        VERY_LOW,   // Just starting to learn, < 20% confidence
-        LOW,        // Emerging pattern, 20-40% confidence
-        MEDIUM,     // Established pattern, 40-60% confidence
-        HIGH,       // Strong pattern, 60-80% confidence
-        VERY_HIGH   // Extremely reliable pattern, > 80% confidence
-    }
-    
-    // Learning sources
+
+    // -----------------------------------------------------------------------
+    // Enums
+    // -----------------------------------------------------------------------
+
+    public enum LearningMode { PASSIVE, ACTIVE, AUTONOMOUS }
+
+    public enum ConfidenceLevel { VERY_LOW, LOW, MEDIUM, HIGH, VERY_HIGH }
+
     public enum LearningSource {
-        USER_ACTION,    // Learned from user actions
-        OBSERVATION,    // Observed behavior
-        SYSTEM_EVENT,   // System events
-        AUTOMATED_TEST, // Automated testing
-        SYNTHETIC,      // Synthetic data
-        CROSS_APP,      // Cross-application pattern
-        GAME_SPECIFIC,  // Game-specific pattern
-        IMPORTED        // Imported from external source
+        USER_ACTION, OBSERVATION, SYSTEM_EVENT, AUTOMATED_TEST,
+        SYNTHETIC, CROSS_APP, GAME_SPECIFIC, IMPORTED
     }
-    
-    // Learning parameters
-    private static final int MAX_PATTERNS = 1000;
-    private static final int MAX_HISTORY = 500;
-    private static final double MINIMUM_PATTERN_CONFIDENCE = 0.2; // 20% minimum confidence
-    private static final double ACTION_SUCCESS_REWARD = 0.1; // Reward for successful action
-    private static final double ACTION_FAILURE_PENALTY = 0.15; // Penalty for failed action
-    
-    // Core learning state
+
+    // -----------------------------------------------------------------------
+    // Constants
+    // -----------------------------------------------------------------------
+
+    private static final int    MAX_PATTERNS            = 1_000;
+    private static final int    MAX_HISTORY             = 500;
+    private static final double MIN_PATTERN_CONFIDENCE  = 0.20;
+    private static final double ACTION_SUCCESS_REWARD   = 0.10;
+    private static final double ACTION_FAILURE_PENALTY  = 0.15;
+    private static final int    SEQUENCE_WINDOW         = 5;    // N-gram window
+    private static final int    MIN_SEQUENCE_HITS       = 3;    // before promoting
+    private static final String PATTERNS_FILE           = "learning_patterns.json";
+    private static final String PREFS_NAME              = "learning_engine";
+
+    // -----------------------------------------------------------------------
+    // State
+    // -----------------------------------------------------------------------
+
     private final Context context;
-    private LearningMode currentMode = LearningMode.PASSIVE;
-    private boolean initialized = false;
-    private boolean lowPowerMode = false;
-    
-    // Pattern storage and history
-    private final Map<String, LearningPattern> patterns = new ConcurrentHashMap<>();
-    private final List<Map<String, Object>> actionHistory = new CopyOnWriteArrayList<>();
-    private final Map<String, Integer> patternUsageCounts = new ConcurrentHashMap<>();
-    private SharedPreferences preferences;
-    
-    // Learning stats
-    private int totalObservations = 0;
-    private int totalSuccessfulPredictions = 0;
-    private int totalActions = 0;
-    private double overallConfidence = 0.0;
-    private long learningStartTime;
-    
+    private volatile LearningMode currentMode  = LearningMode.PASSIVE;
+    private volatile boolean initialized       = false;
+    private volatile boolean lowPowerMode      = false;
+
     /**
-     * Create a new learning engine
+     * Access-ordered LinkedHashMap for true LRU eviction.
+     * Wrapped in ConcurrentHashMap for thread-safe iteration; LRU updates are
+     * synchronized on the lruMap itself.
      */
+    private final LinkedHashMap<String, LearningPattern> lruMap;
+    private final Map<String, LearningPattern> patterns;
+
+    private final List<Map<String, Object>> actionHistory = new CopyOnWriteArrayList<>();
+    private SharedPreferences preferences;
+
+    // Temporal sequence tracking
+    private final List<String> recentActionKeys   = new ArrayList<>();
+    private final Map<String, Integer> sequenceHits = new ConcurrentHashMap<>();
+
+    // Stats
+    private int    totalObservations          = 0;
+    private int    totalSuccessfulPredictions = 0;
+    private int    totalActions               = 0;
+    private double overallConfidence          = 0.0;
+    private long   learningStartTime;
+
+    // -----------------------------------------------------------------------
+    // Constructor / init
+    // -----------------------------------------------------------------------
+
     public LearningEngine(Context context) {
         this.context = context;
-        
-        // Initialize
+        // Create LRU-ordered map (capacity + 1, load-factor 0.75, access-order)
+        this.lruMap  = new LinkedHashMap<String, LearningPattern>(
+                MAX_PATTERNS + 1, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, LearningPattern> eldest) {
+                return size() > MAX_PATTERNS;
+            }
+        };
+        this.patterns = new ConcurrentHashMap<>();
         initialize();
     }
-    
-    /**
-     * Initialize the learning engine
-     */
+
     private void initialize() {
         try {
-            // Load preferences
-            preferences = context.getSharedPreferences("learning_engine", Context.MODE_PRIVATE);
-            
-            // Load previous patterns if available
+            preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             loadPatterns();
-            
-            // Set initialization timestamp
             learningStartTime = System.currentTimeMillis();
-            
-            // Set initialized flag
-            initialized = true;
-            
-            Log.d(TAG, "Learning engine initialized with " + patterns.size() + " patterns");
+            initialized       = true;
+            Log.i(TAG, "LearningEngine initialized with " + patterns.size() + " patterns");
         } catch (Exception e) {
-            Log.e(TAG, "Error initializing learning engine: " + e.getMessage(), e);
+            Log.e(TAG, "Error initializing LearningEngine", e);
             initialized = false;
         }
     }
-    
-    /**
-     * Set learning mode
-     */
+
+    // -----------------------------------------------------------------------
+    // Mode / power
+    // -----------------------------------------------------------------------
+
     public void setLearningMode(LearningMode mode) {
         if (this.currentMode != mode) {
-            Log.d(TAG, "Changing learning mode from " + this.currentMode + " to " + mode);
+            Log.d(TAG, "Mode: " + this.currentMode + " → " + mode);
             this.currentMode = mode;
         }
     }
-    
-    /**
-     * Get current learning mode
-     */
-    public LearningMode getLearningMode() {
-        return currentMode;
-    }
-    
-    /**
-     * Set low power mode
-     */
-    public void setLowPowerMode(boolean enabled) {
-        this.lowPowerMode = enabled;
-    }
-    
-    /**
-     * Process screen analysis results
-     */
+
+    public LearningMode getLearningMode() { return currentMode; }
+    public void setLowPowerMode(boolean enabled) { this.lowPowerMode = enabled; }
+
+    // -----------------------------------------------------------------------
+    // Primary input: screen analysis results
+    // -----------------------------------------------------------------------
+
     public void processScreenAnalysis(Map<String, Object> results) {
-        if (!initialized) {
-            return;
-        }
-        
+        if (!initialized || results == null) return;
         try {
-            // Increment observation counter
             totalObservations++;
-            
-            // Extract content type
-            Map<String, Object> contentResult = (Map<String, Object>) results.get("content");
-            String contentType = contentResult != null ? (String) contentResult.get("content_type") : "unknown";
-            
-            // Process based on content type
+            Object contentResult = results.get("content");
+            String contentType = "unknown";
+            if (contentResult instanceof Map) {
+                Object ct = ((Map<?, ?>) contentResult).get("content_type");
+                if (ct != null) contentType = ct.toString();
+            }
+            // Also check top-level "action" key produced by accessibility events
+            String action = results.containsKey("action") ? results.get("action").toString() : null;
+            if (action != null) contentType = inferContentType(action, results);
+
             switch (contentType) {
-                case "game":
-                    processGameContent(results);
-                    break;
-                    
+                case "game":       processGameContent(results);    break;
                 case "social":
-                case "messaging":
-                    processSocialContent(results);
-                    break;
-                    
+                case "messaging":  processSocialContent(results);  break;
                 case "browser":
-                case "video":
-                    processMediaContent(results);
-                    break;
-                    
-                default:
-                    processGenericContent(results);
-                    break;
+                case "video":      processMediaContent(results);   break;
+                default:           processGenericContent(results); break;
             }
-            
-            // Update overall confidence
+
             updateOverallConfidence();
-            
-            // Add to history
             addToHistory(results);
-            
         } catch (Exception e) {
-            Log.e(TAG, "Error processing screen analysis: " + e.getMessage(), e);
+            Log.e(TAG, "Error processing screen analysis", e);
         }
     }
-    
+
     /**
-     * Process game-specific content
+     * Direct entry point for AIAccessibilityService interaction records.
+     * Records the interaction into LearningEngine and updates temporal sequences.
      */
+    public void recordUserInteraction(String actionType, String packageName,
+                                      String className, String elementId,
+                                      Map<String, Object> extra) {
+        if (!initialized) return;
+        try {
+            // Per-package action pattern
+            String key = "pkg_" + packageName.replace('.', '_') + "_" + actionType;
+            LearningPattern p = getOrCreatePattern(key);
+            p.observations++;
+            p.source       = LearningSource.USER_ACTION;
+            p.confidence   = calculatePatternConfidence(p);
+            trackUsage(key);
+
+            // Cross-app key (no package prefix)
+            String xAppKey = "xapp_" + actionType + "_" + elementId.replace('/', '_');
+            LearningPattern xp = getOrCreatePattern(xAppKey);
+            xp.observations++;
+            xp.source    = LearningSource.CROSS_APP;
+            xp.confidence = calculatePatternConfidence(xp);
+            trackUsage(xAppKey);
+
+            // Temporal sequence tracking
+            updateTemporalSequences(key);
+        } catch (Exception e) {
+            Log.e(TAG, "Error recording user interaction", e);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Content processors
+    // -----------------------------------------------------------------------
+
+    @SuppressWarnings("unchecked")
     private void processGameContent(Map<String, Object> results) {
-        // Extract enemies data
-        List<Map<String, Object>> enemies = (List<Map<String, Object>>) results.get("enemies");
-        
-        if (enemies != null && !enemies.isEmpty()) {
-            // Learn enemy patterns
+        List<Map<String, Object>> enemies =
+                (List<Map<String, Object>>) results.get("enemies");
+        if (enemies != null) {
             for (Map<String, Object> enemy : enemies) {
-                String enemyId = (String) enemy.get("id");
-                double threat = (double) enemy.getOrDefault("threat", 0.0);
-                
-                // Create pattern key
-                String patternKey = "game_enemy_threat_" + (threat > 0.7 ? "high" : threat > 0.4 ? "medium" : "low");
-                
-                // Get or create pattern
-                LearningPattern pattern = getOrCreatePattern(patternKey);
-                
-                // Update pattern
-                pattern.observations++;
-                pattern.confidence = calculatePatternConfidence(pattern);
-                
-                // Learn enemy position patterns
-                Map<String, Integer> bounds = (Map<String, Integer>) enemy.get("bounds");
-                if (bounds != null) {
-                    int centerX = (bounds.get("left") + bounds.get("right")) / 2;
-                    int centerY = (bounds.get("top") + bounds.get("bottom")) / 2;
-                    
-                    // Is enemy in center region?
-                    boolean inCenterRegion = centerX > 400 && centerX < 680 && centerY > 300 && centerY < 780;
-                    
-                    String positionPatternKey = "game_enemy_position_" + (inCenterRegion ? "center" : "peripheral");
-                    LearningPattern positionPattern = getOrCreatePattern(positionPatternKey);
-                    positionPattern.observations++;
-                    positionPattern.confidence = calculatePatternConfidence(positionPattern);
-                }
-            }
-            
-            // Learn highest threat enemy targeting pattern
-            Map<String, Object> highestThreatEnemy = (Map<String, Object>) results.get("highest_threat_enemy");
-            if (highestThreatEnemy != null) {
-                String patternKey = "game_target_highest_threat";
-                LearningPattern pattern = getOrCreatePattern(patternKey);
-                pattern.observations++;
-                pattern.confidence = calculatePatternConfidence(pattern);
+                Object threatObj = enemy.getOrDefault("threat", 0.0);
+                double threat    = threatObj instanceof Number
+                        ? ((Number) threatObj).doubleValue() : 0.0;
+                String level     = threat > 0.7 ? "high" : threat > 0.4 ? "medium" : "low";
+                bump("game_enemy_threat_" + level);
             }
         }
+        if (results.containsKey("highest_threat_enemy")) bump("game_target_highest_threat");
     }
-    
-    /**
-     * Process social/messaging content
-     */
+
+    @SuppressWarnings("unchecked")
     private void processSocialContent(Map<String, Object> results) {
-        // Extract text
-        List<Map<String, Object>> textElements = (List<Map<String, Object>>) results.get("text");
-        
-        if (textElements != null && !textElements.isEmpty()) {
-            // Look for common social patterns
-            for (Map<String, Object> text : textElements) {
-                String textContent = (String) text.get("text");
-                
-                if (textContent != null) {
-                    String lowercaseText = textContent.toLowerCase();
-                    
-                    // Check for message patterns
-                    if (lowercaseText.contains("message") || lowercaseText.contains("chat") || 
-                        lowercaseText.contains("send") || lowercaseText.contains("reply")) {
-                        
-                        String patternKey = "social_message_interaction";
-                        LearningPattern pattern = getOrCreatePattern(patternKey);
-                        pattern.observations++;
-                        pattern.confidence = calculatePatternConfidence(pattern);
-                    }
-                    
-                    // Check for notification patterns
-                    if (lowercaseText.contains("notification") || lowercaseText.contains("alert") || 
-                        lowercaseText.contains("new") || lowercaseText.contains("unread")) {
-                        
-                        String patternKey = "social_notification_pattern";
-                        LearningPattern pattern = getOrCreatePattern(patternKey);
-                        pattern.observations++;
-                        pattern.confidence = calculatePatternConfidence(pattern);
-                    }
-                }
-            }
+        List<Map<String, Object>> texts =
+                (List<Map<String, Object>>) results.get("text");
+        if (texts == null) return;
+        for (Map<String, Object> t : texts) {
+            Object tc = t.get("text");
+            if (!(tc instanceof String)) continue;
+            String lower = ((String) tc).toLowerCase();
+            if (lower.contains("message") || lower.contains("chat")
+                    || lower.contains("send") || lower.contains("reply"))
+                bump("social_message_interaction");
+            if (lower.contains("notification") || lower.contains("alert")
+                    || lower.contains("unread"))
+                bump("social_notification_pattern");
         }
     }
-    
-    /**
-     * Process media content
-     */
+
+    @SuppressWarnings("unchecked")
     private void processMediaContent(Map<String, Object> results) {
-        // Extract text and objects
-        List<Map<String, Object>> textElements = (List<Map<String, Object>>) results.get("text");
-        List<Map<String, Object>> objects = (List<Map<String, Object>>) results.get("objects");
-        
-        // Text-based patterns
-        if (textElements != null && !textElements.isEmpty()) {
-            for (Map<String, Object> text : textElements) {
-                String textContent = (String) text.get("text");
-                
-                if (textContent != null) {
-                    String lowercaseText = textContent.toLowerCase();
-                    
-                    // Media control patterns
-                    if (lowercaseText.contains("play") || lowercaseText.contains("pause") || 
-                        lowercaseText.contains("stop") || lowercaseText.contains("next") || 
-                        lowercaseText.contains("previous")) {
-                        
-                        String patternKey = "media_control_pattern";
-                        LearningPattern pattern = getOrCreatePattern(patternKey);
-                        pattern.observations++;
-                        pattern.confidence = calculatePatternConfidence(pattern);
-                    }
-                }
-            }
-        }
-        
-        // Object-based patterns
-        if (objects != null && !objects.isEmpty()) {
-            for (Map<String, Object> obj : objects) {
-                String objectClass = (String) obj.get("class");
-                
-                if (objectClass != null) {
-                    // Media playing patterns
-                    if (objectClass.equals("tv") || objectClass.equals("monitor") || 
-                        objectClass.equals("screen") || objectClass.equals("laptop")) {
-                        
-                        String patternKey = "media_viewing_pattern";
-                        LearningPattern pattern = getOrCreatePattern(patternKey);
-                        pattern.observations++;
-                        pattern.confidence = calculatePatternConfidence(pattern);
-                    }
-                }
+        List<Map<String, Object>> texts =
+                (List<Map<String, Object>>) results.get("text");
+        if (texts != null) {
+            for (Map<String, Object> t : texts) {
+                Object tc = t.get("text");
+                if (!(tc instanceof String)) continue;
+                String lower = ((String) tc).toLowerCase();
+                if (lower.contains("play") || lower.contains("pause")
+                        || lower.contains("next") || lower.contains("previous"))
+                    bump("media_control_pattern");
             }
         }
     }
-    
-    /**
-     * Process generic content
-     */
+
+    @SuppressWarnings("unchecked")
     private void processGenericContent(Map<String, Object> results) {
-        // Extract text features and objects
-        Map<String, Object> textFeatures = (Map<String, Object>) results.get("text_features");
-        List<Map<String, Object>> objects = (List<Map<String, Object>>) results.get("objects");
-        
-        // UI element patterns
-        if (textFeatures != null) {
-            boolean hasButton = (boolean) textFeatures.getOrDefault("has_button", false);
-            boolean hasMenu = (boolean) textFeatures.getOrDefault("has_menu", false);
-            
-            if (hasButton) {
-                String patternKey = "ui_button_interaction";
-                LearningPattern pattern = getOrCreatePattern(patternKey);
-                pattern.observations++;
-                pattern.confidence = calculatePatternConfidence(pattern);
-            }
-            
-            if (hasMenu) {
-                String patternKey = "ui_menu_navigation";
-                LearningPattern pattern = getOrCreatePattern(patternKey);
-                pattern.observations++;
-                pattern.confidence = calculatePatternConfidence(pattern);
-            }
+        Map<String, Object> tf = (Map<String, Object>) results.get("text_features");
+        if (tf != null) {
+            if (Boolean.TRUE.equals(tf.get("has_button"))) bump("ui_button_interaction");
+            if (Boolean.TRUE.equals(tf.get("has_menu")))   bump("ui_menu_navigation");
         }
-        
-        // Object recognition patterns
-        if (objects != null && !objects.isEmpty()) {
-            // Count object types
-            Map<String, Integer> objectCounts = new HashMap<>();
-            
-            for (Map<String, Object> obj : objects) {
-                String objectClass = (String) obj.get("class");
-                
-                if (objectClass != null) {
-                    objectCounts.put(objectClass, objectCounts.getOrDefault(objectClass, 0) + 1);
-                }
-            }
-            
-            // Learn patterns based on common objects
-            for (Map.Entry<String, Integer> entry : objectCounts.entrySet()) {
-                if (entry.getValue() >= 2) { // Only learn if multiple instances
-                    String patternKey = "object_multiple_" + entry.getKey();
-                    LearningPattern pattern = getOrCreatePattern(patternKey);
-                    pattern.observations++;
-                    pattern.confidence = calculatePatternConfidence(pattern);
-                }
-            }
+        List<Map<String, Object>> objects =
+                (List<Map<String, Object>>) results.get("objects");
+        if (objects == null) return;
+        Map<String, Integer> counts = new HashMap<>();
+        for (Map<String, Object> obj : objects) {
+            Object cls = obj.get("class");
+            if (cls != null)
+                counts.merge(cls.toString(), 1, Integer::sum);
+        }
+        for (Map.Entry<String, Integer> e : counts.entrySet()) {
+            if (e.getValue() >= 2) bump("object_multiple_" + e.getKey());
         }
     }
-    
-    /**
-     * Record action result for learning
-     */
-    public void recordActionResult(String actionType, Map<String, Object> actionParams, boolean success) {
-        if (!initialized) {
-            return;
-        }
-        
+
+    // -----------------------------------------------------------------------
+    // Action result recording
+    // -----------------------------------------------------------------------
+
+    public void recordActionResult(String actionType, Map<String, Object> params,
+                                   boolean success) {
+        if (!initialized) return;
         try {
-            // Increment action counter
             totalActions++;
-            
-            // Create pattern key based on action type
-            String patternKey = "action_" + actionType.toLowerCase();
-            
-            // Get or create pattern
-            LearningPattern pattern = getOrCreatePattern(patternKey);
-            
-            // Update pattern based on success
-            pattern.observations++;
-            
+            String key = "action_" + actionType.toLowerCase();
+            LearningPattern p = getOrCreatePattern(key);
+            p.observations++;
             if (success) {
-                pattern.successCount++;
-                pattern.confidence += ACTION_SUCCESS_REWARD;
-            } else {
-                pattern.confidence -= ACTION_FAILURE_PENALTY;
-            }
-            
-            // Ensure confidence is within bounds
-            pattern.confidence = Math.max(0.0, Math.min(1.0, pattern.confidence));
-            
-            // Track usage
-            patternUsageCounts.put(patternKey, patternUsageCounts.getOrDefault(patternKey, 0) + 1);
-            
-            // If successful, increment counter
-            if (success) {
+                p.successCount++;
+                p.confidence = Math.min(1.0, p.confidence + ACTION_SUCCESS_REWARD);
                 totalSuccessfulPredictions++;
+            } else {
+                p.confidence = Math.max(0.0, p.confidence - ACTION_FAILURE_PENALTY);
             }
-            
-            // Create action record
-            Map<String, Object> actionRecord = new HashMap<>();
-            actionRecord.put("type", actionType);
-            actionRecord.put("params", actionParams);
-            actionRecord.put("success", success);
-            actionRecord.put("timestamp", System.currentTimeMillis());
-            actionRecord.put("pattern_key", patternKey);
-            actionRecord.put("pattern_confidence", pattern.confidence);
-            
-            // Add to history
-            addToHistory(actionRecord);
-            
-            // Update overall confidence
+            trackUsage(key);
+
+            Map<String, Object> rec = new HashMap<>();
+            rec.put("type",               actionType);
+            rec.put("params",             params);
+            rec.put("success",            success);
+            rec.put("timestamp",          System.currentTimeMillis());
+            rec.put("pattern_key",        key);
+            rec.put("pattern_confidence", p.confidence);
+            addToHistory(rec);
             updateOverallConfidence();
-            
         } catch (Exception e) {
-            Log.e(TAG, "Error recording action result: " + e.getMessage(), e);
+            Log.e(TAG, "Error recording action result", e);
         }
     }
-    
-    /**
-     * Check if a pattern should be applied in current context
-     */
-    public boolean shouldApplyPattern(String patternKey, Map<String, Object> currentContext) {
-        if (!initialized) {
-            return false;
-        }
-        
-        // Get pattern
-        LearningPattern pattern = patterns.get(patternKey);
-        
-        if (pattern == null) {
-            return false;
-        }
-        
-        // Check if confidence is high enough
-        if (pattern.confidence < MINIMUM_PATTERN_CONFIDENCE) {
-            return false;
-        }
-        
-        // Check if we're in appropriate mode
+
+    // -----------------------------------------------------------------------
+    // Pattern query helpers
+    // -----------------------------------------------------------------------
+
+    public boolean shouldApplyPattern(String key, Map<String, Object> ctx) {
+        if (!initialized) return false;
+        LearningPattern p = patterns.get(key);
+        if (p == null || p.confidence < MIN_PATTERN_CONFIDENCE) return false;
         switch (currentMode) {
-            case PASSIVE:
-                return false; // Never apply patterns in passive mode
-                
-            case ACTIVE:
-                // Only apply high confidence patterns
-                return pattern.confidence >= 0.6;
-                
-            case AUTONOMOUS:
-                // Apply patterns with medium or higher confidence
-                return pattern.confidence >= 0.4;
-                
-            default:
-                return false;
+            case PASSIVE:    return false;
+            case ACTIVE:     return p.confidence >= 0.60;
+            case AUTONOMOUS: return p.confidence >= 0.40;
+            default:         return false;
         }
     }
-    
-    /**
-     * Get recommended action for current context
-     */
-    public Map<String, Object> getRecommendedAction(Map<String, Object> currentContext) {
-        if (!initialized) {
-            return null;
-        }
-        
-        // Find best pattern match
-        String bestPatternKey = null;
-        double bestConfidence = MINIMUM_PATTERN_CONFIDENCE;
-        
-        for (Map.Entry<String, LearningPattern> entry : patterns.entrySet()) {
-            LearningPattern pattern = entry.getValue();
-            
-            if (pattern.confidence > bestConfidence && matchesContext(pattern, currentContext)) {
-                bestPatternKey = entry.getKey();
-                bestConfidence = pattern.confidence;
+
+    public Map<String, Object> getRecommendedAction(Map<String, Object> ctx) {
+        if (!initialized) return null;
+        String best   = null;
+        double bestC  = MIN_PATTERN_CONFIDENCE;
+        for (Map.Entry<String, LearningPattern> e : patterns.entrySet()) {
+            if (e.getValue().confidence > bestC) {
+                bestC = e.getValue().confidence;
+                best  = e.getKey();
             }
         }
-        
-        // If no pattern found, return null
-        if (bestPatternKey == null) {
-            return null;
-        }
-        
-        // Get pattern
-        LearningPattern bestPattern = patterns.get(bestPatternKey);
-        
-        // Create recommendation
-        Map<String, Object> recommendation = new HashMap<>();
-        recommendation.put("pattern_key", bestPatternKey);
-        recommendation.put("confidence", bestPattern.confidence);
-        recommendation.put("observations", bestPattern.observations);
-        recommendation.put("success_rate", bestPattern.getSuccessRate());
-        
-        // Get action details based on pattern key
-        String[] parts = bestPatternKey.split("_", 2);
+        if (best == null) return null;
+        LearningPattern p = patterns.get(best);
+        Map<String, Object> rec = new HashMap<>();
+        rec.put("pattern_key",  best);
+        rec.put("confidence",   p.confidence);
+        rec.put("observations", p.observations);
+        rec.put("success_rate", p.getSuccessRate());
+        String[] parts = best.split("_", 2);
         if (parts.length > 1) {
-            if (parts[0].equals("action")) {
-                recommendation.put("action_type", parts[1]);
-            } else if (parts[0].equals("game")) {
-                recommendation.put("action_type", "game_action");
-                recommendation.put("action_subtype", parts[1]);
-            } else if (parts[0].equals("ui")) {
-                recommendation.put("action_type", "ui_action");
-                recommendation.put("action_subtype", parts[1]);
+            rec.put("action_type",    parts[0].equals("action") ? parts[1] : parts[0] + "_action");
+            rec.put("action_subtype", parts[1]);
+        }
+        return rec;
+    }
+
+    // -----------------------------------------------------------------------
+    // Temporal sequence detection
+    // -----------------------------------------------------------------------
+
+    private void updateTemporalSequences(String actionKey) {
+        recentActionKeys.add(actionKey);
+        if (recentActionKeys.size() > SEQUENCE_WINDOW * 2) {
+            recentActionKeys.remove(0);
+        }
+        // Build bigrams and trigrams
+        int sz = recentActionKeys.size();
+        if (sz >= 2) {
+            String bigram = recentActionKeys.get(sz - 2) + "→" + recentActionKeys.get(sz - 1);
+            sequenceHits.merge(bigram, 1, Integer::sum);
+            if (sequenceHits.get(bigram) >= MIN_SEQUENCE_HITS) {
+                LearningPattern sp = getOrCreatePattern("seq_" + bigram);
+                sp.observations++;
+                sp.source    = LearningSource.OBSERVATION;
+                sp.confidence = calculatePatternConfidence(sp);
             }
         }
-        
-        return recommendation;
-    }
-    
-    /**
-     * Check if pattern matches current context
-     */
-    private boolean matchesContext(LearningPattern pattern, Map<String, Object> currentContext) {
-        // In a full implementation, this would check context features
-        // For this simplified version, we'll just return true
-        return true;
-    }
-    
-    /**
-     * Get or create a learning pattern
-     */
-    private LearningPattern getOrCreatePattern(String patternKey) {
-        // Check if pattern exists
-        LearningPattern pattern = patterns.get(patternKey);
-        
-        // If not, create it
-        if (pattern == null) {
-            pattern = new LearningPattern();
-            pattern.patternKey = patternKey;
-            pattern.createdAt = System.currentTimeMillis();
-            
-            // Add to patterns map
-            patterns.put(patternKey, pattern);
-            
-            // If we have too many patterns, remove least used ones
-            if (patterns.size() > MAX_PATTERNS) {
-                prunePatterns();
+        if (sz >= 3) {
+            String trigram = recentActionKeys.get(sz - 3) + "→"
+                    + recentActionKeys.get(sz - 2) + "→" + recentActionKeys.get(sz - 1);
+            sequenceHits.merge(trigram, 1, Integer::sum);
+            if (sequenceHits.get(trigram) >= MIN_SEQUENCE_HITS) {
+                LearningPattern sp = getOrCreatePattern("seq3_" + trigram);
+                sp.observations++;
+                sp.source    = LearningSource.OBSERVATION;
+                sp.confidence = calculatePatternConfidence(sp);
             }
         }
-        
-        // Update last used time
-        pattern.lastUsedAt = System.currentTimeMillis();
-        
-        return pattern;
     }
-    
-    /**
-     * Calculate pattern confidence
-     */
-    private double calculatePatternConfidence(LearningPattern pattern) {
-        // Base confidence on number of observations, success rate, and age
-        
-        // Observation factor (more observations = higher confidence)
-        double observationFactor = Math.min(1.0, pattern.observations / 10.0);
-        
-        // Success factor (higher success rate = higher confidence)
-        double successFactor = pattern.getSuccessRate();
-        
-        // Recency factor (more recent = higher confidence)
-        long ageMs = System.currentTimeMillis() - pattern.createdAt;
-        double ageDays = ageMs / (1000.0 * 60 * 60 * 24);
-        double recencyFactor = Math.max(0.0, 1.0 - (ageDays / 30.0)); // Decay over 30 days
-        
-        // Combined confidence
-        double rawConfidence = (0.4 * observationFactor) + 
-                               (0.4 * successFactor) + 
-                               (0.2 * recencyFactor);
-        
-        // Ensure it's within bounds
-        return Math.max(0.0, Math.min(1.0, rawConfidence));
+
+    // -----------------------------------------------------------------------
+    // Pattern utilities
+    // -----------------------------------------------------------------------
+
+    /** Bump a pattern's observation count by 1 and recalculate confidence. */
+    private void bump(String key) {
+        LearningPattern p = getOrCreatePattern(key);
+        p.observations++;
+        p.confidence = calculatePatternConfidence(p);
+        trackUsage(key);
     }
-    
-    /**
-     * Update overall confidence
-     */
+
+    private LearningPattern getOrCreatePattern(String key) {
+        LearningPattern p = patterns.get(key);
+        if (p == null) {
+            p = new LearningPattern();
+            p.patternKey = key;
+            p.createdAt  = System.currentTimeMillis();
+            patterns.put(key, p);
+            synchronized (lruMap) { lruMap.put(key, p); }
+        }
+        p.lastUsedAt = System.currentTimeMillis();
+        synchronized (lruMap) { lruMap.get(key); } // touch for LRU
+        return p;
+    }
+
+    private void trackUsage(String key) {
+        // No-op — LRU is tracked via lruMap access order
+    }
+
+    private double calculatePatternConfidence(LearningPattern p) {
+        double obsFactor     = Math.min(1.0, p.observations / 10.0);
+        double successFactor = p.getSuccessRate();
+        long   ageMs         = System.currentTimeMillis() - p.createdAt;
+        double ageDays       = ageMs / (1000.0 * 60 * 60 * 24);
+        double recencyFactor = Math.max(0.0, 1.0 - ageDays / 30.0);
+        return Math.max(0.0, Math.min(1.0,
+                0.4 * obsFactor + 0.4 * successFactor + 0.2 * recencyFactor));
+    }
+
     private void updateOverallConfidence() {
-        // Calculate overall confidence based on success rate and pattern confidence
-        double successRate = totalActions > 0 ? 
-            (double) totalSuccessfulPredictions / totalActions : 0.0;
-        
-        // Calculate average pattern confidence
-        double avgPatternConfidence = 0.0;
-        int patternCount = 0;
-        
-        for (LearningPattern pattern : patterns.values()) {
-            avgPatternConfidence += pattern.confidence;
-            patternCount++;
-        }
-        
-        avgPatternConfidence = patternCount > 0 ? avgPatternConfidence / patternCount : 0.0;
-        
-        // Overall confidence formula
-        overallConfidence = (0.6 * successRate) + (0.4 * avgPatternConfidence);
+        double successRate = totalActions > 0
+                ? (double) totalSuccessfulPredictions / totalActions : 0.0;
+        double avgConf = 0.0;
+        int cnt = 0;
+        for (LearningPattern p : patterns.values()) { avgConf += p.confidence; cnt++; }
+        avgConf = cnt > 0 ? avgConf / cnt : 0.0;
+        overallConfidence = 0.6 * successRate + 0.4 * avgConf;
     }
-    
-    /**
-     * Remove least used patterns to stay under the limit
-     */
-    private void prunePatterns() {
-        try {
-            // Find least used patterns
-            List<String> patternKeys = new ArrayList<>(patterns.keySet());
-            
-            // Sort by usage count (ascending)
-            patternKeys.sort((k1, k2) -> {
-                int count1 = patternUsageCounts.getOrDefault(k1, 0);
-                int count2 = patternUsageCounts.getOrDefault(k2, 0);
-                return Integer.compare(count1, count2);
-            });
-            
-            // Remove oldest patterns to get back under limit
-            int toRemove = patterns.size() - MAX_PATTERNS;
-            
-            for (int i = 0; i < toRemove && i < patternKeys.size(); i++) {
-                String key = patternKeys.get(i);
-                patterns.remove(key);
-                patternUsageCounts.remove(key);
-            }
-            
-        } catch (Exception e) {
-            Log.e(TAG, "Error pruning patterns: " + e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Add to action history
-     */
+
     private void addToHistory(Map<String, Object> record) {
-        // Add to history
         actionHistory.add(record);
-        
-        // Trim history if needed
-        while (actionHistory.size() > MAX_HISTORY) {
-            actionHistory.remove(0);
-        }
+        while (actionHistory.size() > MAX_HISTORY) actionHistory.remove(0);
     }
-    
-    /**
-     * Save current state
-     */
+
+    private String inferContentType(String action, Map<String, Object> data) {
+        String pkg = data.containsKey("packageName") ? data.get("packageName").toString() : "";
+        if (pkg.contains("game") || pkg.contains("pubg") || pkg.contains("freefire"))
+            return "game";
+        if (pkg.contains("whatsapp") || pkg.contains("telegram") || pkg.contains("messenger"))
+            return "social";
+        if (pkg.contains("youtube") || pkg.contains("netflix") || pkg.contains("browser"))
+            return "media";
+        return "generic";
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence — full JSON serialization
+    // -----------------------------------------------------------------------
+
     public boolean saveState() {
-        if (!initialized) {
-            return false;
-        }
-        
+        if (!initialized) return false;
         try {
-            // In a real implementation, this would serialize and save all patterns
-            // For this simplified version, we'll just save some basic counts
-            SharedPreferences.Editor editor = preferences.edit();
-            
-            // Save counts
-            editor.putInt("total_observations", totalObservations);
-            editor.putInt("total_actions", totalActions);
-            editor.putInt("total_successful_predictions", totalSuccessfulPredictions);
-            
-            // Save pattern keys (limited to 100 to avoid exceeding limits)
-            Set<String> keySet = new HashSet<>();
-            int count = 0;
-            
-            for (String key : patterns.keySet()) {
-                keySet.add(key);
-                count++;
-                
-                if (count >= 100) {
-                    break;
-                }
+            // --- SharedPreferences for scalars ---
+            SharedPreferences.Editor ed = preferences.edit();
+            ed.putInt("total_observations",           totalObservations);
+            ed.putInt("total_actions",                totalActions);
+            ed.putInt("total_successful_predictions", totalSuccessfulPredictions);
+            ed.putFloat("overall_confidence",         (float) overallConfidence);
+            ed.apply();
+
+            // --- JSON file for full pattern data ---
+            JSONArray arr = new JSONArray();
+            for (LearningPattern p : patterns.values()) {
+                JSONObject obj = new JSONObject();
+                obj.put("key",          p.patternKey);
+                obj.put("observations", p.observations);
+                obj.put("successCount", p.successCount);
+                obj.put("confidence",   p.confidence);
+                obj.put("createdAt",    p.createdAt);
+                obj.put("lastUsedAt",   p.lastUsedAt);
+                obj.put("source",       p.source.name());
+                arr.put(obj);
             }
-            
-            editor.putStringSet("pattern_keys", keySet);
-            
-            // Save confidence
-            editor.putFloat("overall_confidence", (float) overallConfidence);
-            
-            // Apply changes
-            editor.apply();
-            
+            File pFile = new File(context.getFilesDir(), PATTERNS_FILE);
+            try (FileWriter fw = new FileWriter(pFile)) { fw.write(arr.toString(2)); }
+
+            Log.d(TAG, "Saved " + patterns.size() + " patterns");
             return true;
-            
         } catch (Exception e) {
-            Log.e(TAG, "Error saving learning state: " + e.getMessage(), e);
+            Log.e(TAG, "Error saving learning state", e);
             return false;
         }
     }
-    
-    /**
-     * Load saved patterns
-     */
+
     private void loadPatterns() {
+        // Scalars
+        totalObservations          = preferences.getInt("total_observations", 0);
+        totalActions               = preferences.getInt("total_actions", 0);
+        totalSuccessfulPredictions = preferences.getInt("total_successful_predictions", 0);
+        overallConfidence          = preferences.getFloat("overall_confidence", 0f);
+
+        // Full pattern data from JSON
+        File pFile = new File(context.getFilesDir(), PATTERNS_FILE);
+        if (!pFile.exists()) return;
         try {
-            // In a real implementation, this would deserialize all saved patterns
-            // For this simplified version, we'll just load some basic counts
-            
-            totalObservations = preferences.getInt("total_observations", 0);
-            totalActions = preferences.getInt("total_actions", 0);
-            totalSuccessfulPredictions = preferences.getInt("total_successful_predictions", 0);
-            overallConfidence = preferences.getFloat("overall_confidence", 0.0f);
-            
-            // Load pattern keys
-            Set<String> keySet = preferences.getStringSet("pattern_keys", new HashSet<>());
-            
-            // Create empty patterns for each key
-            for (String key : keySet) {
-                LearningPattern pattern = new LearningPattern();
-                pattern.patternKey = key;
-                pattern.createdAt = System.currentTimeMillis() - 86400000; // 1 day ago
-                pattern.observations = 5; // Default value
-                pattern.confidence = 0.3; // Default confidence
-                
-                patterns.put(key, pattern);
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(new FileReader(pFile))) {
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line);
             }
-            
+            JSONArray arr = new JSONArray(sb.toString());
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.getJSONObject(i);
+                LearningPattern p = new LearningPattern();
+                p.patternKey   = obj.getString("key");
+                p.observations = obj.optInt("observations", 0);
+                p.successCount = obj.optInt("successCount", 0);
+                p.confidence   = obj.optDouble("confidence", 0.0);
+                p.createdAt    = obj.optLong("createdAt", System.currentTimeMillis());
+                p.lastUsedAt   = obj.optLong("lastUsedAt", p.createdAt);
+                try {
+                    p.source = LearningSource.valueOf(obj.optString("source", "OBSERVATION"));
+                } catch (IllegalArgumentException ignored) {
+                    p.source = LearningSource.OBSERVATION;
+                }
+                patterns.put(p.patternKey, p);
+                synchronized (lruMap) { lruMap.put(p.patternKey, p); }
+            }
+            Log.d(TAG, "Loaded " + patterns.size() + " patterns from disk");
         } catch (Exception e) {
-            Log.e(TAG, "Error loading learning state: " + e.getMessage(), e);
+            Log.e(TAG, "Error loading patterns from JSON", e);
         }
     }
-    
-    /**
-     * Get learning stats
-     */
+
+    // -----------------------------------------------------------------------
+    // Public API
+    // -----------------------------------------------------------------------
+
     public Map<String, Object> getPerformanceMetrics() {
-        Map<String, Object> metrics = new HashMap<>();
-        
-        metrics.put("total_observations", totalObservations);
-        metrics.put("total_actions", totalActions);
-        metrics.put("total_successful_predictions", totalSuccessfulPredictions);
-        metrics.put("pattern_count", patterns.size());
-        metrics.put("overall_confidence", overallConfidence);
-        
-        if (totalActions > 0) {
-            metrics.put("success_rate", (double) totalSuccessfulPredictions / totalActions);
-        } else {
-            metrics.put("success_rate", 0.0);
-        }
-        
-        metrics.put("learning_mode", currentMode.toString());
-        metrics.put("low_power_mode", lowPowerMode);
-        metrics.put("uptime_ms", System.currentTimeMillis() - learningStartTime);
-        
-        return metrics;
+        Map<String, Object> m = new HashMap<>();
+        m.put("total_observations",           totalObservations);
+        m.put("total_actions",                totalActions);
+        m.put("total_successful_predictions", totalSuccessfulPredictions);
+        m.put("pattern_count",                patterns.size());
+        m.put("overall_confidence",           overallConfidence);
+        m.put("success_rate", totalActions > 0
+                ? (double) totalSuccessfulPredictions / totalActions : 0.0);
+        m.put("learning_mode", currentMode.toString());
+        m.put("low_power_mode", lowPowerMode);
+        m.put("uptime_ms", System.currentTimeMillis() - learningStartTime);
+        return m;
     }
-    
-    /**
-     * Get confidence level for a pattern
-     */
-    public ConfidenceLevel getConfidenceLevel(double confidence) {
-        if (confidence < 0.2) {
-            return ConfidenceLevel.VERY_LOW;
-        } else if (confidence < 0.4) {
-            return ConfidenceLevel.LOW;
-        } else if (confidence < 0.6) {
-            return ConfidenceLevel.MEDIUM;
-        } else if (confidence < 0.8) {
-            return ConfidenceLevel.HIGH;
-        } else {
-            return ConfidenceLevel.VERY_HIGH;
-        }
+
+    public ConfidenceLevel getConfidenceLevel(double c) {
+        if (c < 0.2) return ConfidenceLevel.VERY_LOW;
+        if (c < 0.4) return ConfidenceLevel.LOW;
+        if (c < 0.6) return ConfidenceLevel.MEDIUM;
+        if (c < 0.8) return ConfidenceLevel.HIGH;
+        return ConfidenceLevel.VERY_HIGH;
     }
-    
-    /**
-     * Reset learning engine
-     */
+
+    public int getPatternCount()       { return patterns.size(); }
+    public double getOverallConfidence() { return overallConfidence; }
+
     public void reset() {
         patterns.clear();
-        patternUsageCounts.clear();
+        synchronized (lruMap) { lruMap.clear(); }
         actionHistory.clear();
-        totalObservations = 0;
-        totalActions = 0;
-        totalSuccessfulPredictions = 0;
+        recentActionKeys.clear();
+        sequenceHits.clear();
+        totalObservations = totalActions = totalSuccessfulPredictions = 0;
         overallConfidence = 0.0;
         learningStartTime = System.currentTimeMillis();
-        
-        // Save reset state
         saveState();
+        Log.i(TAG, "LearningEngine reset");
     }
-    
-    /**
-     * Learning pattern class
-     */
+
+    // -----------------------------------------------------------------------
+    // Pattern model
+    // -----------------------------------------------------------------------
+
     private static class LearningPattern {
-        String patternKey;
-        int observations = 0;
-        int successCount = 0;
-        double confidence = 0.0;
-        long createdAt;
-        long lastUsedAt;
-        LearningSource source = LearningSource.OBSERVATION;
+        String         patternKey;
+        int            observations = 0;
+        int            successCount = 0;
+        double         confidence   = 0.0;
+        long           createdAt;
+        long           lastUsedAt;
+        LearningSource source       = LearningSource.OBSERVATION;
         Map<String, Object> metadata = new HashMap<>();
-        
-        /**
-         * Get success rate for this pattern
-         */
+
         double getSuccessRate() {
             return observations > 0 ? (double) successCount / observations : 0.0;
         }

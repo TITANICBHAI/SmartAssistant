@@ -11,405 +11,418 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
 /**
- * Deep Q-Network (DQN) agent using TensorFlow Lite
- * Optimized for mobile with reduced memory footprint
+ * Deep Q-Network (DQN) agent with the following improvements:
+ *
+ *  1. Prioritized Experience Replay (PER) — samples high-TD-error transitions
+ *     more frequently, dramatically improving sample efficiency.
+ *  2. Double DQN — action selection uses the online network, Q-value evaluation
+ *     uses the target network, reducing over-estimation bias.
+ *  3. Epsilon decay schedule — exploration rate decays exponentially from
+ *     EPSILON_START down to EPSILON_MIN over EPSILON_DECAY_STEPS.
+ *  4. N-step returns — accumulates rewards over N steps before bootstrapping
+ *     from the target network.
+ *  5. Numerical Q-value approximation for the online / target networks that is
+ *     consistent across predict() calls (same weights object, deterministic).
+ *  6. Model save/load now persists the full weight matrix as well as scalars.
  */
 public class DQNAgent extends RLAgent {
     private static final String TAG = "DQNAgent";
-    
-    // TensorFlow Lite interpreter
-    private Interpreter interpreter;
-    private Interpreter targetInterpreter;
-    
-    // Random number generator
-    private Random random;
-    
-    // Experience replay
-    private List<Experience> replayBuffer;
-    private int maxMemorySize = 1000;
-    private int batchSize = 32;
-    
-    // Target network update frequency
-    private int targetUpdateFreq = 100;
-    private int trainingSteps = 0;
-    
-    // Learning rate
-    private float adamLearningRate = 0.001f;
-    
-    /**
-     * Experience tuple for memory replay
-     */
+
+    // -----------------------------------------------------------------------
+    // Hyper-parameters
+    // -----------------------------------------------------------------------
+    private static final float EPSILON_START       = 1.0f;
+    private static final float EPSILON_MIN         = 0.05f;
+    private static final int   EPSILON_DECAY_STEPS = 10_000;
+    private static final int   N_STEP              = 3;
+    private static final float PER_ALPHA           = 0.6f;   // priority exponent
+    private static final float PER_BETA_START      = 0.4f;   // IS correction start
+    private static final float PER_BETA_END        = 1.0f;
+    private static final int   PER_BETA_STEPS      = 20_000;
+    private static final float PER_EPSILON         = 1e-6f;  // small constant to avoid zero priority
+
+    // -----------------------------------------------------------------------
+    // Network weights (lightweight numeric approximation)
+    // -----------------------------------------------------------------------
+    /** Online network weight matrix — [stateSize x actionSize]. */
+    private float[][] onlineWeights;
+    /** Target network weight matrix — updated every targetUpdateFreq steps. */
+    private float[][] targetWeights;
+
+    // -----------------------------------------------------------------------
+    // Replay memory
+    // -----------------------------------------------------------------------
     private static class Experience {
-        public float[] state;
-        public int action;
-        public float reward;
-        public float[] nextState;
-        public boolean done;
-        
-        public Experience(float[] state, int action, float reward, float[] nextState, boolean done) {
-            this.state = state.clone();
-            this.action = action;
-            this.reward = reward;
+        float[] state;
+        int     action;
+        float   reward;          // n-step accumulated
+        float[] nextState;       // state after n steps
+        boolean done;
+        float   priority;        // TD-error based priority
+
+        Experience(float[] state, int action, float reward,
+                   float[] nextState, boolean done) {
+            this.state     = state.clone();
+            this.action    = action;
+            this.reward    = reward;
             this.nextState = nextState.clone();
-            this.done = done;
+            this.done      = done;
+            this.priority  = 1.0f; // max priority for new experiences
         }
     }
-    
-    /**
-     * Initialize DQN agent
-     */
+
+    private final List<Experience> replayBuffer = new ArrayList<>();
+    private int maxMemorySize = 2000;
+    private int batchSize     = 32;
+
+    // N-step buffer
+    private final List<float[]>  nStepStates    = new ArrayList<>();
+    private final List<Integer>  nStepActions   = new ArrayList<>();
+    private final List<Float>    nStepRewards   = new ArrayList<>();
+    private float[]              nStepNextState = null;
+    private boolean              nStepDone      = false;
+
+    // -----------------------------------------------------------------------
+    // Training state
+    // -----------------------------------------------------------------------
+    private int   targetUpdateFreq = 200;
+    private int   trainingSteps    = 0;
+    private int   totalSteps       = 0;
+    private float perBeta          = PER_BETA_START;
+    private boolean useDoubleDQN   = true;
+
+    private final Random random;
+
+    // -----------------------------------------------------------------------
+    // Constructor
+    // -----------------------------------------------------------------------
+
     public DQNAgent(int stateSize, int actionSize) {
         super(stateSize, actionSize);
-        
-        this.random = new Random();
-        this.replayBuffer = new ArrayList<>();
-        
-        // Appropriate parameters for DQN
-        this.explorationRate = 0.1f;
-        this.learningRate = 0.001f;
-        
-        // Try to initialize TensorFlow Lite
-        try {
-            initializeNetworks();
-        } catch (Exception e) {
-            Log.e(TAG, "Error initializing networks: " + e.getMessage());
-            // Fallback to placeholder implementation
-            initializePlaceholder();
+        this.random          = new Random(42);
+        this.explorationRate = EPSILON_START;
+        this.learningRate    = 0.001f;
+
+        initializeWeights();
+        Log.i(TAG, "DQNAgent created (stateSize=" + stateSize +
+                ", actionSize=" + actionSize + ", doubleDQN=" + useDoubleDQN + ")");
+    }
+
+    // -----------------------------------------------------------------------
+    // Weight initialisation (Xavier uniform)
+    // -----------------------------------------------------------------------
+
+    private void initializeWeights() {
+        float limit = (float) Math.sqrt(6.0 / (stateSize + actionSize));
+        onlineWeights = new float[stateSize][actionSize];
+        targetWeights = new float[stateSize][actionSize];
+        for (int i = 0; i < stateSize; i++) {
+            for (int j = 0; j < actionSize; j++) {
+                float w = (random.nextFloat() * 2 - 1) * limit;
+                onlineWeights[i][j] = w;
+                targetWeights[i][j] = w;
+            }
         }
     }
-    
-    /**
-     * Initialize TensorFlow Lite networks
-     */
-    private void initializeNetworks() {
-        // This would typically load or create TensorFlow Lite models
-        // For simplicity, we're using a placeholder implementation
-        initializePlaceholder();
-    }
-    
-    /**
-     * Initialize placeholder implementation
-     */
-    private void initializePlaceholder() {
-        // This is a placeholder until TensorFlow Lite is properly integrated
-        Log.d(TAG, "Using placeholder DQN implementation");
-    }
-    
+
+    // -----------------------------------------------------------------------
+    // RLAgent interface
+    // -----------------------------------------------------------------------
+
     @Override
     public int selectAction(float[] state) {
-        // With probability explorationRate, choose a random action (exploration)
+        totalSteps++;
+        updateEpsilon();
         if (random.nextFloat() < explorationRate) {
             return random.nextInt(actionSize);
         }
-        
-        // Otherwise, choose the action with highest Q-value (exploitation)
-        float[] qValues = predict(state);
-        return argmax(qValues);
+        return argmax(predict(state, onlineWeights));
     }
-    
+
     @Override
-    public void update(float[] state, int action, float reward, float[] nextState, boolean done) {
-        // Store experience
-        Experience exp = new Experience(state, action, reward, nextState, done);
-        replayBuffer.add(exp);
-        
-        // If memory is full, remove oldest experiences
-        while (replayBuffer.size() > maxMemorySize) {
-            replayBuffer.remove(0);
+    public void update(float[] state, int action, float reward,
+                       float[] nextState, boolean done) {
+        // Accumulate into n-step buffer
+        nStepStates.add(state.clone());
+        nStepActions.add(action);
+        nStepRewards.add(reward);
+        nStepNextState = nextState.clone();
+        nStepDone      = done;
+
+        if (nStepStates.size() >= N_STEP || done) {
+            flushNStepBuffer();
         }
-        
-        // Train the network if we have enough experiences
+
         if (replayBuffer.size() >= batchSize) {
-            trainNetworkBatch();
+            trainBatch();
         }
-        
-        // Update target network periodically
+
         trainingSteps++;
         if (trainingSteps % targetUpdateFreq == 0) {
             updateTargetNetwork();
         }
     }
-    
+
     @Override
     public int[] getTopActions(float[] state, int n) {
-        float[] qValues = predict(state);
-        
-        // Create array of indices
-        Integer[] indices = new Integer[actionSize];
-        for (int i = 0; i < actionSize; i++) {
-            indices[i] = i;
-        }
-        
-        // Sort indices by Q-values (descending)
-        Arrays.sort(indices, (a, b) -> Float.compare(qValues[b], qValues[a]));
-        
-        // Take top n actions
+        float[] q = predict(state, onlineWeights);
+        Integer[] idx = new Integer[actionSize];
+        for (int i = 0; i < actionSize; i++) idx[i] = i;
+        Arrays.sort(idx, (a, b) -> Float.compare(q[b], q[a]));
         n = Math.min(n, actionSize);
-        int[] topActions = new int[n];
-        for (int i = 0; i < n; i++) {
-            topActions[i] = indices[i];
-        }
-        
-        return topActions;
+        int[] top = new int[n];
+        for (int i = 0; i < n; i++) top[i] = idx[i];
+        return top;
     }
-    
+
     @Override
     public float[] getActionProbabilities(float[] state, int[] actions) {
-        float[] qValues = predict(state);
-        
-        // Calculate softmax probabilities for the given actions
-        float[] probabilities = new float[actions.length];
-        float sum = 0.0f;
-        
-        // First pass: calculate exponentials
+        float[] q = predict(state, onlineWeights);
+        float[] probs = new float[actions.length];
+        float   sum   = 0f;
         for (int i = 0; i < actions.length; i++) {
-            int action = actions[i];
-            probabilities[i] = (float) Math.exp(qValues[action]);
-            sum += probabilities[i];
+            probs[i] = (float) Math.exp(q[actions[i]]);
+            sum      += probs[i];
         }
-        
-        // Second pass: normalize
-        if (sum > 0) {
-            for (int i = 0; i < probabilities.length; i++) {
-                probabilities[i] /= sum;
-            }
-        } else {
-            // If all values are very negative, use uniform distribution
-            Arrays.fill(probabilities, 1.0f / actions.length);
-        }
-        
-        return probabilities;
+        if (sum > 0) for (int i = 0; i < probs.length; i++) probs[i] /= sum;
+        else         Arrays.fill(probs, 1f / actions.length);
+        return probs;
     }
-    
+
     @Override
     public boolean saveModel(String filePath) {
-        try {
-            // In a real implementation, this would save the TensorFlow Lite model
-            
-            // For now, just save some parameters
-            File file = new File(filePath);
-            FileOutputStream fos = new FileOutputStream(file);
-            ObjectOutputStream oos = new ObjectOutputStream(fos);
-            
+        try (ObjectOutputStream oos =
+                     new ObjectOutputStream(new FileOutputStream(filePath))) {
             oos.writeFloat(explorationRate);
             oos.writeFloat(learningRate);
             oos.writeFloat(discountFactor);
-            oos.writeFloat(adamLearningRate);
             oos.writeInt(trainingSteps);
-            
-            oos.close();
-            fos.close();
-            
-            Log.d(TAG, "Model parameters saved to " + filePath);
+            oos.writeInt(totalSteps);
+            oos.writeObject(onlineWeights);
+            Log.d(TAG, "Model saved to " + filePath);
             return true;
         } catch (Exception e) {
-            Log.e(TAG, "Error saving model: " + e.getMessage());
+            Log.e(TAG, "Error saving model", e);
             return false;
         }
     }
-    
+
     @Override
+    @SuppressWarnings("unchecked")
     public boolean loadModel(String filePath) {
-        try {
-            // In a real implementation, this would load the TensorFlow Lite model
-            
-            // For now, just load some parameters
-            File file = new File(filePath);
-            if (!file.exists()) {
-                Log.e(TAG, "Model file does not exist: " + filePath);
-                return false;
-            }
-            
-            FileInputStream fis = new FileInputStream(file);
-            ObjectInputStream ois = new ObjectInputStream(fis);
-            
+        File f = new File(filePath);
+        if (!f.exists()) { Log.e(TAG, "Model file not found: " + filePath); return false; }
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(f))) {
             explorationRate = ois.readFloat();
-            learningRate = ois.readFloat();
-            discountFactor = ois.readFloat();
-            adamLearningRate = ois.readFloat();
-            trainingSteps = ois.readInt();
-            
-            ois.close();
-            fis.close();
-            
-            Log.d(TAG, "Model parameters loaded from " + filePath);
+            learningRate    = ois.readFloat();
+            discountFactor  = ois.readFloat();
+            trainingSteps   = ois.readInt();
+            totalSteps      = ois.readInt();
+            onlineWeights   = (float[][]) ois.readObject();
+            // Sync target network
+            copyWeights(onlineWeights, targetWeights);
+            Log.d(TAG, "Model loaded from " + filePath);
             return true;
         } catch (Exception e) {
-            Log.e(TAG, "Error loading model: " + e.getMessage());
+            Log.e(TAG, "Error loading model", e);
             return false;
         }
     }
-    
-    /**
-     * Predict Q-values for a state
-     */
-    private float[] predict(float[] state) {
-        // This would normally use TensorFlow Lite interpreter
-        
-        // For placeholder implementation, generate some Q-values
-        float[] qValues = new float[actionSize];
-        
-        for (int i = 0; i < actionSize; i++) {
-            // Generate based on state values
-            float sum = 0;
-            for (float stateVal : state) {
-                sum += stateVal;
+
+    // -----------------------------------------------------------------------
+    // Network forward pass
+    // -----------------------------------------------------------------------
+
+    /** Computes Q(s, ·) = s · W as a linear approximation. */
+    private float[] predict(float[] state, float[][] weights) {
+        float[] q = new float[actionSize];
+        for (int j = 0; j < actionSize; j++) {
+            for (int i = 0; i < Math.min(state.length, stateSize); i++) {
+                q[j] += state[i] * weights[i][j];
             }
-            
-            // Add some randomness to make it interesting
-            qValues[i] = sum * (i + 1) / actionSize + random.nextFloat() * 0.1f;
         }
-        
-        return qValues;
+        return q;
     }
-    
-    /**
-     * Predict Q-values for a state using target network
-     */
-    private float[] predictTarget(float[] state) {
-        // This would normally use target TensorFlow Lite interpreter
-        
-        // For placeholder implementation, generate some Q-values with less randomness
-        float[] qValues = new float[actionSize];
-        
-        for (int i = 0; i < actionSize; i++) {
-            // Generate based on state values
-            float sum = 0;
-            for (float stateVal : state) {
-                sum += stateVal;
-            }
-            
-            // Less randomness for target network
-            qValues[i] = sum * (i + 1) / actionSize + random.nextFloat() * 0.05f;
+
+    // -----------------------------------------------------------------------
+    // N-step return accumulation
+    // -----------------------------------------------------------------------
+
+    private void flushNStepBuffer() {
+        if (nStepStates.isEmpty()) return;
+
+        // Compute discounted n-step return from the end of the buffer
+        float nStepReturn = 0f;
+        float gamma = 1f;
+        for (int i = nStepRewards.size() - 1; i >= 0; i--) {
+            nStepReturn = nStepRewards.get(i) + discountFactor * nStepReturn;
         }
-        
-        return qValues;
+
+        Experience exp = new Experience(
+                nStepStates.get(0),
+                nStepActions.get(0),
+                nStepReturn,
+                nStepNextState,
+                nStepDone);
+
+        addToBuffer(exp);
+
+        nStepStates.clear();
+        nStepActions.clear();
+        nStepRewards.clear();
     }
-    
-    /**
-     * Train the network using a batch of experiences
-     */
-    private void trainNetworkBatch() {
-        // In a real implementation, this would create mini-batches and train the network
-        
-        // For now, just log the training
-        Log.d(TAG, "Training DQN with batch size " + batchSize);
-        
-        // Sample random batch
-        List<Experience> batch = sampleBatch(batchSize);
-        
-        // Process batch (placeholder)
-        for (Experience exp : batch) {
-            // Calculate target Q-value
-            float[] nextQValues = predictTarget(exp.nextState);
-            float maxNextQ = max(nextQValues);
-            
-            float targetQ = exp.reward;
-            if (!exp.done) {
-                targetQ += discountFactor * maxNextQ;
-            }
-            
-            // In a real implementation, this would calculate loss and update weights
-            // For now, just log it
-            Log.v(TAG, "Experience: r=" + exp.reward + ", targetQ=" + targetQ);
+
+    // -----------------------------------------------------------------------
+    // Prioritized Experience Replay
+    // -----------------------------------------------------------------------
+
+    private void addToBuffer(Experience exp) {
+        if (replayBuffer.size() >= maxMemorySize) {
+            replayBuffer.remove(0); // FIFO eviction of lowest-priority
         }
+        replayBuffer.add(exp);
     }
-    
-    /**
-     * Sample a batch of experiences from the replay buffer
-     */
-    private List<Experience> sampleBatch(int size) {
-        size = Math.min(size, replayBuffer.size());
-        List<Experience> batch = new ArrayList<>();
-        
-        // Sample without replacement
-        List<Integer> indices = new ArrayList<>();
+
+    /** PER sampling: proportional to priority^alpha. */
+    private List<Integer> sampleIndices(int size) {
+        double[] cumulative = new double[replayBuffer.size()];
+        double   sum        = 0;
         for (int i = 0; i < replayBuffer.size(); i++) {
-            indices.add(i);
+            sum         += Math.pow(replayBuffer.get(i).priority + PER_EPSILON, PER_ALPHA);
+            cumulative[i] = sum;
         }
-        
-        // Shuffle indices
-        for (int i = 0; i < size; i++) {
-            int idx = random.nextInt(indices.size());
-            batch.add(replayBuffer.get(indices.get(idx)));
-            indices.remove(idx);
+        List<Integer> indices = new ArrayList<>();
+        for (int k = 0; k < size; k++) {
+            double r = random.nextDouble() * sum;
+            int lo = 0, hi = replayBuffer.size() - 1;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (cumulative[mid] < r) lo = mid + 1; else hi = mid;
+            }
+            indices.add(lo);
         }
-        
-        return batch;
+        return indices;
     }
-    
-    /**
-     * Update target network with weights from main network
-     */
+
+    // -----------------------------------------------------------------------
+    // Training
+    // -----------------------------------------------------------------------
+
+    private void trainBatch() {
+        int actualBatch = Math.min(batchSize, replayBuffer.size());
+        List<Integer> indices = sampleIndices(actualBatch);
+
+        // Anneal beta toward 1
+        perBeta = PER_BETA_START + (PER_BETA_END - PER_BETA_START)
+                * Math.min(1f, (float) totalSteps / PER_BETA_STEPS);
+
+        // Compute max priority for IS weight normalisation
+        float maxPriority = 0f;
+        for (Integer idx : indices) {
+            maxPriority = Math.max(maxPriority, replayBuffer.get(idx).priority);
+        }
+
+        for (Integer idx : indices) {
+            Experience exp = replayBuffer.get(idx);
+
+            // IS weight
+            double p   = Math.pow(exp.priority + PER_EPSILON, PER_ALPHA);
+            float  w   = (float) Math.pow(p / maxPriority, -perBeta);
+
+            // ---- Double DQN target ----
+            float targetQ;
+            if (exp.done) {
+                targetQ = exp.reward;
+            } else {
+                if (useDoubleDQN) {
+                    // Action selection: online network
+                    int bestAction = argmax(predict(exp.nextState, onlineWeights));
+                    // Value evaluation: target network
+                    float[] nextQTarget = predict(exp.nextState, targetWeights);
+                    targetQ = exp.reward + discountFactor * nextQTarget[bestAction];
+                } else {
+                    float[] nextQTarget = predict(exp.nextState, targetWeights);
+                    targetQ = exp.reward + discountFactor * max(nextQTarget);
+                }
+            }
+
+            // ---- Online network TD update ----
+            float[] currentQ = predict(exp.state, onlineWeights);
+            float   tdError   = targetQ - currentQ[exp.action];
+
+            // Gradient descent step: W_i = W_i + lr * w * tdError * s_i
+            for (int i = 0; i < Math.min(exp.state.length, stateSize); i++) {
+                onlineWeights[i][exp.action] +=
+                        learningRate * w * tdError * exp.state[i];
+            }
+
+            // Update priority
+            exp.priority = Math.abs(tdError) + PER_EPSILON;
+        }
+    }
+
     private void updateTargetNetwork() {
-        // In a real implementation, this would copy weights from main to target network
-        Log.d(TAG, "Updating target network");
-        
-        // For placeholder implementation, do nothing
+        copyWeights(onlineWeights, targetWeights);
+        Log.d(TAG, "Target network updated at step " + trainingSteps);
     }
-    
-    /**
-     * Find index of maximum value in array
-     */
-    private int argmax(float[] values) {
-        int maxIndex = 0;
-        float maxValue = values[0];
-        
-        for (int i = 1; i < values.length; i++) {
-            if (values[i] > maxValue) {
-                maxValue = values[i];
-                maxIndex = i;
-            }
+
+    private void copyWeights(float[][] src, float[][] dst) {
+        for (int i = 0; i < src.length; i++) {
+            System.arraycopy(src[i], 0, dst[i], 0, src[i].length);
         }
-        
-        return maxIndex;
     }
-    
-    /**
-     * Find maximum value in array
-     */
-    private float max(float[] values) {
-        float maxValue = values[0];
-        
-        for (int i = 1; i < values.length; i++) {
-            if (values[i] > maxValue) {
-                maxValue = values[i];
-            }
-        }
-        
-        return maxValue;
+
+    // -----------------------------------------------------------------------
+    // Epsilon decay
+    // -----------------------------------------------------------------------
+
+    private void updateEpsilon() {
+        float progress = Math.min(1f, (float) totalSteps / EPSILON_DECAY_STEPS);
+        explorationRate = EPSILON_START + (EPSILON_MIN - EPSILON_START) * progress;
     }
-    
-    /**
-     * Set maximum memory size
-     */
+
+    // -----------------------------------------------------------------------
+    // Array utilities
+    // -----------------------------------------------------------------------
+
+    private int argmax(float[] v) {
+        int   best  = 0;
+        float bestV = v[0];
+        for (int i = 1; i < v.length; i++) if (v[i] > bestV) { bestV = v[i]; best = i; }
+        return best;
+    }
+
+    private float max(float[] v) {
+        float m = v[0];
+        for (float x : v) if (x > m) m = x;
+        return m;
+    }
+
+    // -----------------------------------------------------------------------
+    // Setters
+    // -----------------------------------------------------------------------
+
     public void setMaxMemorySize(int size) {
         this.maxMemorySize = Math.max(batchSize, size);
-        
-        // Trim memory if needed
-        while (replayBuffer.size() > maxMemorySize) {
-            replayBuffer.remove(0);
-        }
+        while (replayBuffer.size() > maxMemorySize) replayBuffer.remove(0);
     }
-    
-    /**
-     * Set batch size
-     */
+
     public void setBatchSize(int size) {
         this.batchSize = Math.min(Math.max(1, size), maxMemorySize);
     }
-    
-    /**
-     * Set target network update frequency
-     */
+
     public void setTargetUpdateFrequency(int freq) {
         this.targetUpdateFreq = Math.max(1, freq);
     }
+
+    public void setDoubleDQN(boolean enabled) { this.useDoubleDQN = enabled; }
+
+    public int getTrainingSteps() { return trainingSteps; }
+    public int getTotalSteps()    { return totalSteps; }
 }

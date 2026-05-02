@@ -137,3 +137,65 @@ android/              # Mock Android SDK shims (for non-Android compilation)
 | `NetworkStateMonitor` | `ConnectivityManager.NetworkCallback` on API 21+; legacy BroadcastReceiver fallback |
 | `SmartBatteryOptimizer` | Sticky `ACTION_BATTERY_CHANGED` receiver; tiered throttle (warn/low/critical) |
 | `CrashRecoveryManager` | UncaughtExceptionHandler + heartbeat stall detector + crash log rotation |
+
+## Major Improvements Log (Session 3)
+
+### QLearningAgent.java — complete rewrite
+- **Q(λ) with replacing traces** — eligibility traces propagate credit backwards through
+  the trajectory; replacing semantics prevent runaway trace accumulation.
+- **Bug fix:** original `replayExperiences()` recursively called `update()`, causing infinite
+  loops. Mini-batch replay now applies TD updates directly without any recursion.
+- **LRU Q-table** — `LinkedHashMap` in access-order mode; entries beyond `MAX_TABLE_SIZE`
+  (50 000) are evicted automatically to bound memory.
+- **Epsilon-decay schedule** — linear decay from 1.0 → 0.05 over 5 000 steps.
+- **Adaptive learning rate** — α(s,a) = α₀ / (1 + visits × 0.1); rarely-visited pairs
+  receive larger updates.
+- **Optimistic initialisation** — new Q-values seeded at +0.1 to encourage exploration.
+- **Save/load** — persists visit counts, epsilon, bins, and step counter.
+
+### SARSAAgent.java — complete rewrite
+- **Bug fix:** original `updateWithEligibilityTraces()` iterated `qTable.keySet()` while
+  modifying `eligibilityTraces`, risking `ConcurrentModificationException`; now uses a
+  safe snapshot loop with deferred removal.
+- **Bug fix:** recursive `update()` self-call inside the trace loop eliminated.
+- **Replacing traces** — `applyReplacingTrace()` zeroes all actions in (s) then sets
+  e(s,a)=1, preventing accumulation.
+- **On-policy next-action selection** — `nextAction` is drawn from the current policy
+  once before the trace loop (correct SARSA semantics).
+- **Epsilon decay, adaptive α, optimistic init, LRU table** — same improvements as
+  QLearningAgent.
+- Episode state reset (`hasEpisodeStep = false`) on terminal transitions.
+
+### AlgorithmSelector.java — UCB1 adaptive selection
+- **UCB1 bandit selection** — replaces static heuristics; algorithms that perform better
+  accumulate higher mean reward and are selected more often; confidence term balances
+  exploration of underused algorithms.
+- **Per-algorithm performance tracking** — `recordOutcome(AlgorithmType, float)` updates
+  running mean reward and pull count for each algorithm.
+- **Warm-start** — each algorithm is pulled at least 3 times before UCB1 scores are used.
+- **Dyna-Q implemented** — previously fell back silently to Q-Learning; now `DynaQAgent`
+  wraps `DQNAgent` and performs 3 planning steps per real update using a compact
+  environment model map.
+- `getMeanRewards()` exposes per-algorithm performance for monitoring.
+
+### RuleExtractionSystem.java — real IF-THEN rule learner
+- Replaced the empty stub (`findRelevantRules` returned `[]`) with a full rule-induction
+  system.
+- **Observation ingestion** — `observe(state, action, reward)` stores up to 2 000
+  rolling (state, action, reward) tuples.
+- **Rule induction** — background thread (every 60 s) mines frequent
+  (condition → action) pairs using median-threshold APRIORI-style counting.
+- **Rule scoring** — each rule tracks support, confidence, and importance; combined
+  score = 0.6 × confidence + 0.4 × importance + support bonus.
+- **JSON persistence** — rules survive app restarts.
+- **Rule pruning** — rules below MIN_CONFIDENCE (40%) or older than 30 days removed.
+- `findRelevantRules()` now returns real matched rules sorted by score.
+
+### New: com.aiassistant.learning package (4 new classes)
+
+| Class | Purpose |
+|-------|---------|
+| `ContextualMemory` | Rolling episodic memory (1 000 episodes). Cosine-similarity retrieval with recency decay. Feature normalisation (running min/max). JSON persistence. |
+| `ActionOptimizer` | Beam-search action sequence planner. Expands BEAM_WIDTH candidates per depth step up to HORIZON steps. Falls back to greedy Q-value selection when no world model is available. Configurable gamma discount for cumulative reward scoring. |
+| `RewardShaper` | Potential-based reward shaping: r̃ = r + γ·Φ(s') − Φ(s). Built-in potentials: LINEAR, GOAL_DISTANCE, CURIOSITY (1/√visits), COMPOSITE. Action-smoothness penalty. Visit-count map for curiosity bonus. Policy-invariant by construction. |
+| `AdaptiveLearningScheduler` | Priority-queue task scheduler. Integrates with PerformanceMonitor and SmartBatteryOptimizer to skip training rounds under resource pressure. Exponential back-off (5 s → 2 min). Per-task run/skip statistics. |

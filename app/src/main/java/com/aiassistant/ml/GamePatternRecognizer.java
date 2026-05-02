@@ -912,26 +912,133 @@ public class GamePatternRecognizer {
      * Check for strategy patterns
      */
     private void checkStrategyPatterns(GameObservation observation) {
-        // Strategy pattern detection is more complex and would require 
-        // analysis of player actions and outcomes over time
-        // This is a simplified placeholder implementation
-        
-        // In a full implementation, this would:
-        // 1. Extract player actions from recent observations
-        // 2. Identify sequences that led to positive outcomes
-        // 3. Compare with known strategy patterns
-        // 4. Create new patterns for successful sequences
+        Map<String, Object> state = observation.getGameState();
+
+        // Extract player action and outcome from this observation
+        String playerAction = state.containsKey("playerAction")
+                ? state.get("playerAction").toString() : null;
+        Object outcomeObj   = state.get("outcome");
+        float  outcome      = 0f;
+        if (outcomeObj instanceof Number) outcome = ((Number) outcomeObj).floatValue();
+
+        if (playerAction == null || playerAction.isEmpty()) return;
+
+        // Look for recent observations with the same action
+        List<GameObservation> matchingObs = new ArrayList<>();
+        synchronized (recentObservations) {
+            for (GameObservation obs : recentObservations) {
+                Object pa = obs.getGameState().get("playerAction");
+                if (pa != null && pa.toString().equals(playerAction)) {
+                    matchingObs.add(obs);
+                }
+            }
+        }
+        if (matchingObs.size() < 3) return;
+
+        // Compute average outcome for this action
+        float totalOutcome = 0f;
+        for (GameObservation obs : matchingObs) {
+            Object o = obs.getGameState().get("outcome");
+            if (o instanceof Number) totalOutcome += ((Number) o).floatValue();
+        }
+        float avgOutcome = totalOutcome / matchingObs.size();
+
+        // Only register as a strategy pattern when average outcome is positive
+        if (avgOutcome > 0.5f) {
+            String patternId = "strategy_" + playerAction + "_"
+                    + currentGameType + "_" + System.currentTimeMillis();
+
+            if (!strategyPatterns.containsKey(patternId)) {
+                List<PatternStep> steps = new ArrayList<>();
+                Map<String, Object> params = new HashMap<>();
+                params.put("action", playerAction);
+                params.put("avgOutcome", avgOutcome);
+                params.put("sampleCount", matchingObs.size());
+                steps.add(new PatternStep(playerAction, params, 0L, new HashMap<>()));
+
+                long duration = matchingObs.get(matchingObs.size() - 1).getTimestamp()
+                        - matchingObs.get(0).getTimestamp();
+                float confidence = Math.min(0.95f, 0.5f + avgOutcome * 0.45f);
+
+                GameStrategyPattern newPattern = new GameStrategyPattern(
+                        patternId, playerAction, steps, duration, confidence);
+                strategyPatterns.put(patternId, newPattern);
+
+                notifyPatternRecognized("strategy", patternId,
+                        "Effective action: " + playerAction
+                                + " (avg outcome=" + String.format("%.2f", avgOutcome) + ")",
+                        confidence,
+                        params);
+
+                Log.d(TAG, "New strategy pattern: " + patternId + " confidence=" + confidence);
+            }
+        }
     }
     
     /**
      * Check for level patterns
      */
     private void checkLevelPatterns(GameObservation observation) {
-        // In a full implementation, this would:
-        // 1. Extract level features (obstacles, enemies, resources)
-        // 2. Build a map of the level as it's explored
-        // 3. Identify common structures and sequences
-        // 4. Recognize level generation patterns
+        Map<String, Object> state = observation.getGameState();
+
+        // Extract obstacle/resource counts if the game state carries them
+        Object obsCount = state.get("obstacleCount");
+        Object resCount = state.get("resourceCount");
+        Object levelId  = state.get("levelId");
+        if (obsCount == null && resCount == null) return;
+
+        int obstacles = obsCount instanceof Number ? ((Number) obsCount).intValue() : 0;
+        int resources = resCount instanceof Number ? ((Number) resCount).intValue() : 0;
+        String lvl    = levelId != null ? levelId.toString() : "unknown";
+
+        // Build a per-level feature fingerprint from accumulated observations
+        synchronized (recentObservations) {
+            // Scan last N observations for the same level
+            int sameLevel = 0;
+            int totalObs  = 0;
+            int totalRes  = 0;
+            for (GameObservation obs : recentObservations) {
+                Object li = obs.getGameState().get("levelId");
+                if (li != null && li.toString().equals(lvl)) {
+                    sameLevel++;
+                    Object oc = obs.getGameState().get("obstacleCount");
+                    Object rc = obs.getGameState().get("resourceCount");
+                    if (oc instanceof Number) totalObs += ((Number) oc).intValue();
+                    if (rc instanceof Number) totalRes += ((Number) rc).intValue();
+                }
+            }
+            if (sameLevel < 5) return;
+
+            float avgObs = (float) totalObs / sameLevel;
+            float avgRes = (float) totalRes / sameLevel;
+
+            String patternId = "level_" + lvl + "_" + currentGameType;
+            if (!levelPatterns.containsKey(patternId)) {
+                List<PatternStep> steps = new ArrayList<>();
+                Map<String, Object> params = new HashMap<>();
+                params.put("levelId", lvl);
+                params.put("avgObstacles", avgObs);
+                params.put("avgResources", avgRes);
+                params.put("sampleCount", sameLevel);
+                steps.add(new PatternStep("level_scan", params, 0L, new HashMap<>()));
+
+                float density   = avgObs / Math.max(1f, avgObs + avgRes);
+                float confidence = Math.min(0.9f, 0.4f + 0.05f * sameLevel);
+
+                LevelPattern lp = new LevelPattern(
+                        patternId, lvl, steps, 0L, confidence);
+                levelPatterns.put(patternId, lp);
+
+                Map<String, Object> details = new HashMap<>(params);
+                details.put("obstacleDensity", density);
+                notifyPatternRecognized("level", patternId,
+                        "Level " + lvl + ": obstacles=" + String.format("%.1f", avgObs)
+                                + " resources=" + String.format("%.1f", avgRes),
+                        confidence, details);
+
+                Log.d(TAG, "New level pattern: " + patternId);
+            }
+        }
     }
     
     /**
@@ -1111,30 +1218,215 @@ public class GamePatternRecognizer {
      * Analyze enemy patterns deeply
      */
     private void analyzeEnemyPatterns(List<GameObservation> observations, GameContext context) {
-        // In a full implementation, this would:
-        // 1. Identify recurring enemy behaviors across multiple encounters
-        // 2. Determine attack patterns, vulnerabilities, and timing
-        // 3. Generate optimal counter-strategies
+        // Group observations by enemy type and look for recurring behavior sequences
+        Map<String, List<EnemyTrackingData>> byType = new HashMap<>();
+        for (GameObservation obs : observations) {
+            for (Map.Entry<String, List<EnemyTrackingData>> e : obs.getEnemies().entrySet()) {
+                byType.computeIfAbsent(e.getKey(), k -> new ArrayList<>()).addAll(e.getValue());
+            }
+        }
+
+        for (Map.Entry<String, List<EnemyTrackingData>> entry : byType.entrySet()) {
+            String enemyType = entry.getKey();
+            List<EnemyTrackingData> allSightings = entry.getValue();
+            if (allSightings.size() < 6) continue;
+
+            // Measure average velocity and dominant direction over all sightings
+            float totalVx = 0f, totalVy = 0f;
+            for (EnemyTrackingData e : allSightings) {
+                totalVx += e.getVelocityX();
+                totalVy += e.getVelocityY();
+            }
+            float avgVx = totalVx / allSightings.size();
+            float avgVy = totalVy / allSightings.size();
+            float speed = (float) Math.sqrt(avgVx * avgVx + avgVy * avgVy);
+
+            String dominant = Math.abs(avgVx) > Math.abs(avgVy)
+                    ? (avgVx > 0 ? "right" : "left")
+                    : (avgVy > 0 ? "down"  : "up");
+
+            // Look for an attack-rate marker in sighting attributes
+            float attackRate = 0f;
+            int attackCount = 0;
+            for (EnemyTrackingData e : allSightings) {
+                Object ar = e.getAttributes().get("attackRate");
+                if (ar instanceof Number) { attackRate += ((Number) ar).floatValue(); attackCount++; }
+            }
+            if (attackCount > 0) attackRate /= attackCount;
+
+            // Update or create a deep enemy pattern entry
+            String deepId = "deep_enemy_" + enemyType + "_" + context.getGameMode();
+            EnemyPattern existing = enemyPatterns.get(deepId);
+            if (existing == null) {
+                List<PatternStep> steps = new ArrayList<>();
+                Map<String, Object> pm = new HashMap<>();
+                pm.put("dominantDirection", dominant);
+                pm.put("avgSpeed", speed);
+                pm.put("avgAttackRate", attackRate);
+                pm.put("sightings", allSightings.size());
+                steps.add(new PatternStep("move", pm, 0L, new HashMap<>()));
+
+                float confidence = Math.min(0.92f, 0.55f + 0.01f * allSightings.size());
+                EnemyPattern deepPattern = new EnemyPattern(deepId, enemyType, steps, 0L, confidence);
+                enemyPatterns.put(deepId, deepPattern);
+
+                Map<String, Object> details = new HashMap<>(pm);
+                details.put("counterStrategy",
+                        "Counter " + dominant + "-moving " + enemyType
+                                + " by positioning " + oppositeDir(dominant)
+                                + (attackRate > 0.5f ? "; high attack-rate — use ranged." : "."));
+                notifyPatternRecognized("enemy", deepId,
+                        "Deep enemy analysis: " + enemyType, confidence, details);
+                Log.d(TAG, "Deep enemy pattern: " + deepId + " dir=" + dominant);
+            }
+        }
+    }
+
+    private String oppositeDir(String dir) {
+        switch (dir) {
+            case "left":  return "right";
+            case "right": return "left";
+            case "up":    return "below";
+            case "down":  return "above";
+            default:      return "away";
+        }
     }
     
     /**
      * Analyze strategy patterns deeply
      */
     private void analyzeStrategyPatterns(List<GameObservation> observations, GameContext context) {
-        // In a full implementation, this would:
-        // 1. Analyze successful player strategies
-        // 2. Identify key decision points and optimal choices
-        // 3. Refine strategies based on outcomes
+        // Build action→outcome statistics across all observations
+        Map<String, float[]> actionStats = new HashMap<>(); // [totalOutcome, count]
+        for (GameObservation obs : observations) {
+            Map<String, Object> state = obs.getGameState();
+            Object pa = state.get("playerAction");
+            Object ov = state.get("outcome");
+            if (pa == null || ov == null) continue;
+            String action  = pa.toString();
+            float  outcome = ((Number) ov).floatValue();
+            float[] stats  = actionStats.getOrDefault(action, new float[]{0f, 0f});
+            stats[0] += outcome;
+            stats[1] += 1f;
+            actionStats.put(action, stats);
+        }
+
+        // For each action with enough data, update its strategy pattern confidence
+        for (Map.Entry<String, float[]> e : actionStats.entrySet()) {
+            String action = e.getKey();
+            float[] stats = e.getValue();
+            if (stats[1] < 4) continue;
+            float avgOutcome = stats[0] / stats[1];
+
+            // Search existing strategy patterns for this action and update confidence
+            for (Map.Entry<String, GameStrategyPattern> sp : strategyPatterns.entrySet()) {
+                GameStrategyPattern pattern = sp.getValue();
+                if (pattern.getName().equals(action)) {
+                    float updatedConf = Math.min(0.97f,
+                            pattern.getConfidence() * 0.7f + avgOutcome * 0.3f);
+                    pattern.setConfidence(updatedConf);
+                    Log.d(TAG, "Updated strategy confidence for " + action
+                            + ": " + String.format("%.3f", updatedConf));
+                }
+            }
+
+            // If this is a newly discovered consistently-good action, register it
+            boolean alreadyRegistered = false;
+            for (GameStrategyPattern sp : strategyPatterns.values()) {
+                if (sp.getName().equals(action)) { alreadyRegistered = true; break; }
+            }
+            if (!alreadyRegistered && avgOutcome > 0.6f) {
+                String deepId = "deep_strategy_" + action + "_" + context.getGameMode();
+                List<PatternStep> steps = new ArrayList<>();
+                Map<String, Object> pm = new HashMap<>();
+                pm.put("action", action);
+                pm.put("avgOutcome", avgOutcome);
+                pm.put("sampleCount", (int) stats[1]);
+                pm.put("gameMode", context.getGameMode());
+                steps.add(new PatternStep(action, pm, 0L, new HashMap<>()));
+                float confidence = Math.min(0.93f, 0.5f + avgOutcome * 0.43f);
+                GameStrategyPattern gsp = new GameStrategyPattern(
+                        deepId, action, steps,
+                        observations.get(observations.size()-1).getTimestamp()
+                                - observations.get(0).getTimestamp(),
+                        confidence);
+                strategyPatterns.put(deepId, gsp);
+                notifyPatternRecognized("strategy", deepId,
+                        "Deep analysis: action '" + action + "' avg-outcome="
+                                + String.format("%.2f", avgOutcome), confidence, pm);
+                Log.d(TAG, "Deep strategy pattern registered: " + deepId);
+            }
+        }
     }
     
     /**
      * Analyze level patterns deeply
      */
     private void analyzeLevelPatterns(List<GameObservation> observations, GameContext context) {
-        // In a full implementation, this would:
-        // 1. Map level layouts and structures
-        // 2. Identify procedural generation patterns
-        // 3. Optimize navigation and resource collection
+        // Aggregate per-level statistics across all provided observations
+        Map<String, int[]> levelStats = new HashMap<>(); // levelId → [obsCount,totalObs,totalRes]
+        for (GameObservation obs : observations) {
+            Map<String, Object> state = obs.getGameState();
+            Object li = state.get("levelId");
+            if (li == null) continue;
+            String lvl = li.toString();
+            int[] s = levelStats.getOrDefault(lvl, new int[]{0, 0, 0});
+            s[0]++;
+            Object oc = state.get("obstacleCount");
+            Object rc = state.get("resourceCount");
+            if (oc instanceof Number) s[1] += ((Number) oc).intValue();
+            if (rc instanceof Number) s[2] += ((Number) rc).intValue();
+            levelStats.put(lvl, s);
+        }
+
+        for (Map.Entry<String, int[]> entry : levelStats.entrySet()) {
+            String lvl = entry.getKey();
+            int[]  s   = entry.getValue();
+            if (s[0] < 5) continue; // not enough data
+
+            float avgObs = (float) s[1] / s[0];
+            float avgRes = (float) s[2] / s[0];
+            float density = avgObs / Math.max(1f, avgObs + avgRes);
+
+            String deepId = "deep_level_" + lvl + "_" + context.getGameMode();
+            LevelPattern existing = levelPatterns.get(deepId);
+            if (existing != null) {
+                // Update confidence with more data
+                float updatedConf = Math.min(0.95f, existing.getConfidence() + 0.02f);
+                existing.setConfidence(updatedConf);
+            } else {
+                List<PatternStep> steps = new ArrayList<>();
+                Map<String, Object> pm = new HashMap<>();
+                pm.put("levelId", lvl);
+                pm.put("avgObstacles", avgObs);
+                pm.put("avgResources", avgRes);
+                pm.put("obstacleDensity", density);
+                pm.put("sampleCount", s[0]);
+                pm.put("gameMode", context.getGameMode());
+
+                // Derive a navigation hint from obstacle density
+                String navHint;
+                if (density > 0.7f) {
+                    navHint = "High obstacle density — prefer slow, careful movement.";
+                } else if (density > 0.4f) {
+                    navHint = "Mixed terrain — balance speed and caution.";
+                } else {
+                    navHint = "Open level — aggressive resource collection recommended.";
+                }
+                pm.put("navigationHint", navHint);
+                steps.add(new PatternStep("navigate", pm, 0L, new HashMap<>()));
+
+                float confidence = Math.min(0.9f, 0.4f + 0.03f * s[0]);
+                LevelPattern lp = new LevelPattern(deepId, lvl, steps, 0L, confidence);
+                levelPatterns.put(deepId, lp);
+
+                notifyPatternRecognized("level", deepId,
+                        "Deep level analysis: " + lvl + " density="
+                                + String.format("%.2f", density),
+                        confidence, pm);
+                Log.d(TAG, "Deep level pattern: " + deepId + " hint=" + navHint);
+            }
+        }
     }
     
     /**

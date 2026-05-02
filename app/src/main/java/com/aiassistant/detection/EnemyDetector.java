@@ -622,33 +622,117 @@ public class EnemyDetector {
     }
     
     /**
-     * Detect enemies using shape analysis
+     * Detect enemies using shape analysis via Sobel edge detection + connected-component labeling.
+     * Regions whose aspect-ratio, area, and edge-density resemble a character sprite are kept.
      */
     private List<Rect> detectEnemiesWithShape(Bitmap screen) {
-        // This would implement shape-based detection using edge detection,
-        // contour finding, etc. For now, we'll just return a sample result
         List<Rect> results = new ArrayList<>();
-        
-        // Create a few sample detections based on screen size
-        int width = screen.getWidth();
-        int height = screen.getHeight();
-        
-        // Sample enemy at 1/3 of screen
-        results.add(new Rect(
-            width / 3 - 50, 
-            height / 3 - 50, 
-            width / 3 + 50, 
-            height / 3 + 50
-        ));
-        
-        // Sample enemy at 2/3 of screen
-        results.add(new Rect(
-            2 * width / 3 - 40, 
-            2 * height / 3 - 40, 
-            2 * width / 3 + 40, 
-            2 * height / 3 + 40
-        ));
-        
+
+        try {
+            int width  = screen.getWidth();
+            int height = screen.getHeight();
+
+            // ---------- 1. Build grayscale luminance map ----------
+            int step = lowPowerMode ? 4 : 2;
+            int cols  = width  / step;
+            int rows  = height / step;
+            float[][] gray = new float[cols][rows];
+            for (int c = 0; c < cols; c++) {
+                for (int r = 0; r < rows; r++) {
+                    int px = screen.getPixel(c * step, r * step);
+                    gray[c][r] = (Color.red(px) * 0.299f
+                                + Color.green(px) * 0.587f
+                                + Color.blue(px) * 0.114f) / 255f;
+                }
+            }
+
+            // ---------- 2. Sobel edge magnitude ----------
+            boolean[][] edge = new boolean[cols][rows];
+            float edgeThreshold = 0.18f;
+            for (int c = 1; c < cols - 1; c++) {
+                for (int r = 1; r < rows - 1; r++) {
+                    float gx = -gray[c-1][r-1] + gray[c+1][r-1]
+                               - 2*gray[c-1][r] + 2*gray[c+1][r]
+                               - gray[c-1][r+1] + gray[c+1][r+1];
+                    float gy = -gray[c-1][r-1] - 2*gray[c][r-1] - gray[c+1][r-1]
+                               + gray[c-1][r+1] + 2*gray[c][r+1] + gray[c+1][r+1];
+                    float mag = (float) Math.sqrt(gx * gx + gy * gy);
+                    edge[c][r] = mag > edgeThreshold;
+                }
+            }
+
+            // ---------- 3. Connected-component BFS on edge map ----------
+            boolean[][] visited = new boolean[cols][rows];
+            int minArea  = (cols * rows) / 2000;  // ~0.05 % of downsampled image
+            int maxArea  = (cols * rows) / 5;     // not bigger than 20 %
+
+            for (int c = 1; c < cols - 1; c++) {
+                for (int r = 1; r < rows - 1; r++) {
+                    if (!edge[c][r] || visited[c][r]) continue;
+
+                    // BFS
+                    List<int[]> component = new ArrayList<>();
+                    List<int[]> queue    = new ArrayList<>();
+                    queue.add(new int[]{c, r});
+                    visited[c][r] = true;
+
+                    int head = 0;
+                    while (head < queue.size()) {
+                        int[] pos = queue.get(head++);
+                        component.add(pos);
+                        int px = pos[0], py = pos[1];
+
+                        int[][] dirs = {{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{1,-1},{-1,1},{1,1}};
+                        for (int[] d : dirs) {
+                            int nx = px + d[0], ny = py + d[1];
+                            if (nx > 0 && nx < cols-1 && ny > 0 && ny < rows-1
+                                    && edge[nx][ny] && !visited[nx][ny]) {
+                                visited[nx][ny] = true;
+                                queue.add(new int[]{nx, ny});
+                            }
+                        }
+                    }
+
+                    int area = component.size();
+                    if (area < minArea || area > maxArea) continue;
+
+                    // Compute bounding box in downsampled space
+                    int minC = cols, maxC = 0, minR = rows, maxR = 0;
+                    for (int[] pos : component) {
+                        minC = Math.min(minC, pos[0]);
+                        maxC = Math.max(maxC, pos[0]);
+                        minR = Math.min(minR, pos[1]);
+                        maxR = Math.max(maxR, pos[1]);
+                    }
+
+                    int bboxW = maxC - minC + 1;
+                    int bboxH = maxR - minR + 1;
+
+                    // Shape heuristics: character sprites are taller than wide
+                    // and have reasonable edge fill density
+                    float aspect     = (float) bboxH / Math.max(1, bboxW);
+                    float density    = (float) area  / Math.max(1, bboxW * bboxH);
+                    boolean shapeLike = aspect > 0.5f && aspect < 4.0f
+                                     && density > 0.08f && density < 0.85f;
+
+                    if (!shapeLike) continue;
+
+                    // Scale back to original pixel coords
+                    Rect rect = new Rect(
+                        minC * step, minR * step,
+                        (maxC + 1) * step, (maxR + 1) * step
+                    );
+                    results.add(rect);
+                }
+            }
+
+            // Merge overlapping or very close bounding boxes
+            results = removeOverlappingRects(results);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error in shape enemy detection: " + e.getMessage(), e);
+        }
+
         return results;
     }
     

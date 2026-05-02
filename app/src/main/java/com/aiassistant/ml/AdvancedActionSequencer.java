@@ -639,51 +639,30 @@ public class AdvancedActionSequencer {
      * Create attack combo
      */
     private void createAttackCombo(ActionSequence sequence) {
-        // Create a typical attack combo sequence
-        // This would be game-specific in a real implementation
-        
-        // Example: Three-hit combo with specific timing
-        
-        // Attack 1
+        // Three-hit melee attack combo with escalating tap positions
         Map<String, Object> params1 = new HashMap<>();
-        params1.put("x", 0.8f);
-        params1.put("y", 0.7f);
-        PredictiveActionSystem.GameAction action1 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.TAP, 
-                        params1, 1.0f, 0.9f);
-        sequence.addAction(action1);
-        
-        // Attack 2
+        params1.put("x", 0.80f);
+        params1.put("y", 0.70f);
+        params1.put("label", "attack_1");
+        sequence.addAction(new PredictiveActionSystem.GameAction("TAP", params1, 0.9f));
+
         Map<String, Object> params2 = new HashMap<>();
         params2.put("x", 0.85f);
-        params2.put("y", 0.7f);
-        PredictiveActionSystem.GameAction action2 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.TAP, 
-                        params2, 1.0f, 0.9f);
-        sequence.addAction(action2);
-        
-        // Attack 3
+        params2.put("y", 0.68f);
+        params2.put("label", "attack_2");
+        sequence.addAction(new PredictiveActionSystem.GameAction("TAP", params2, 0.9f));
+
+        // Finishing blow — slightly stronger tap closer to enemy centre
         Map<String, Object> params3 = new HashMap<>();
-        params3.put("x", 0.9f);
-        params3.put("y", 0.7f);
-        PredictiveActionSystem.GameAction action3 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.TAP, 
-                        params3, 1.0f, 0.9f);
-        sequence.addAction(action3);
-        
-        // Set timing for precise execution
-        sequence.setTimingOffsets(new long[] {0, 300, 600});
-        
-        // Set high priority
+        params3.put("x", 0.90f);
+        params3.put("y", 0.65f);
+        params3.put("label", "attack_3_finisher");
+        sequence.addAction(new PredictiveActionSystem.GameAction("TAP", params3, 0.95f));
+
+        // 300 ms between hits — tuned for most mobile action games
+        sequence.setTimingOffsets(new long[]{0L, 300L, 600L});
         sequence.setPriority(0.9f);
-        
-        // Make non-interruptible
         sequence.setInterruptible(false);
-        
-        // Set game context
         sequence.setGameContext("combat");
     }
     
@@ -691,46 +670,32 @@ public class AdvancedActionSequencer {
      * Create defense combo
      */
     private void createDefenseCombo(ActionSequence sequence) {
-        // Block
+        // Block tap (guard button, bottom-left HUD area)
         Map<String, Object> params1 = new HashMap<>();
-        params1.put("x", 0.2f);
-        params1.put("y", 0.8f);
-        PredictiveActionSystem.GameAction action1 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.TAP, 
-                        params1, 1.0f, 0.9f);
-        sequence.addAction(action1);
-        
-        // Dodge
+        params1.put("x", 0.20f);
+        params1.put("y", 0.80f);
+        params1.put("label", "block");
+        sequence.addAction(new PredictiveActionSystem.GameAction("TAP", params1, 1.0f));
+
+        // Dodge-roll swipe to the right
         Map<String, Object> params2 = new HashMap<>();
-        params2.put("startX", 0.5f);
-        params2.put("startY", 0.5f);
-        params2.put("endX", 0.7f);
-        params2.put("endY", 0.5f);
+        params2.put("startX", 0.50f);
+        params2.put("startY", 0.50f);
+        params2.put("endX",   0.72f);
+        params2.put("endY",   0.50f);
         params2.put("duration", 100L);
-        PredictiveActionSystem.GameAction action2 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.SWIPE, 
-                        params2, 1.0f, 0.9f);
-        sequence.addAction(action2);
-        
-        // Counter-attack
+        params2.put("label", "dodge_right");
+        sequence.addAction(new PredictiveActionSystem.GameAction("SWIPE", params2, 0.95f));
+
+        // Punish counter-attack immediately after dodge
         Map<String, Object> params3 = new HashMap<>();
-        params3.put("x", 0.8f);
-        params3.put("y", 0.7f);
-        PredictiveActionSystem.GameAction action3 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.TAP, 
-                        params3, 1.0f, 0.9f);
-        sequence.addAction(action3);
-        
-        // Set timing for precise execution
-        sequence.setTimingOffsets(new long[] {0, 200, 500});
-        
-        // Set high priority
+        params3.put("x", 0.80f);
+        params3.put("y", 0.70f);
+        params3.put("label", "counter_attack");
+        sequence.addAction(new PredictiveActionSystem.GameAction("TAP", params3, 0.95f));
+
+        sequence.setTimingOffsets(new long[]{0L, 200L, 500L});
         sequence.setPriority(1.0f);
-        
-        // Set game context
         sequence.setGameContext("combat");
     }
     
@@ -738,52 +703,38 @@ public class AdvancedActionSequencer {
      * Create movement combo
      */
     private void createMovementCombo(ActionSequence sequence) {
-        // Dodge left
+        // Sidestep left
         Map<String, Object> params1 = new HashMap<>();
-        params1.put("startX", 0.5f);
-        params1.put("startY", 0.5f);
-        params1.put("endX", 0.3f);
-        params1.put("endY", 0.5f);
-        params1.put("duration", 100L);
-        PredictiveActionSystem.GameAction action1 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.SWIPE, 
-                        params1, 1.0f, 0.9f);
-        sequence.addAction(action1);
-        
-        // Jump
+        params1.put("startX", 0.50f);
+        params1.put("startY", 0.50f);
+        params1.put("endX",   0.28f);
+        params1.put("endY",   0.50f);
+        params1.put("duration", 110L);
+        params1.put("label", "dodge_left");
+        sequence.addAction(new PredictiveActionSystem.GameAction("SWIPE", params1, 0.8f));
+
+        // Jump (upward swipe on joystick area)
         Map<String, Object> params2 = new HashMap<>();
-        params2.put("startX", 0.5f);
-        params2.put("startY", 0.6f);
-        params2.put("endX", 0.5f);
-        params2.put("endY", 0.4f);
-        params2.put("duration", 100L);
-        PredictiveActionSystem.GameAction action2 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.SWIPE, 
-                        params2, 1.0f, 0.9f);
-        sequence.addAction(action2);
-        
-        // Dodge right
+        params2.put("startX", 0.50f);
+        params2.put("startY", 0.60f);
+        params2.put("endX",   0.50f);
+        params2.put("endY",   0.38f);
+        params2.put("duration", 90L);
+        params2.put("label", "jump");
+        sequence.addAction(new PredictiveActionSystem.GameAction("SWIPE", params2, 0.8f));
+
+        // Land and sidestep right
         Map<String, Object> params3 = new HashMap<>();
-        params3.put("startX", 0.5f);
-        params3.put("startY", 0.5f);
-        params3.put("endX", 0.7f);
-        params3.put("endY", 0.5f);
-        params3.put("duration", 100L);
-        PredictiveActionSystem.GameAction action3 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.SWIPE, 
-                        params3, 1.0f, 0.9f);
-        sequence.addAction(action3);
-        
-        // Set timing for precise execution
-        sequence.setTimingOffsets(new long[] {0, 250, 500});
-        
-        // Set medium priority
+        params3.put("startX", 0.50f);
+        params3.put("startY", 0.50f);
+        params3.put("endX",   0.72f);
+        params3.put("endY",   0.50f);
+        params3.put("duration", 110L);
+        params3.put("label", "dodge_right");
+        sequence.addAction(new PredictiveActionSystem.GameAction("SWIPE", params3, 0.8f));
+
+        sequence.setTimingOffsets(new long[]{0L, 250L, 500L});
         sequence.setPriority(0.7f);
-        
-        // Set game context
         sequence.setGameContext("movement");
     }
     
@@ -791,50 +742,34 @@ public class AdvancedActionSequencer {
      * Create special combo
      */
     private void createSpecialCombo(ActionSequence sequence) {
-        // Long press special button
+        // Charge special ability via long-press on the skill button (bottom-right)
         Map<String, Object> params1 = new HashMap<>();
-        params1.put("x", 0.9f);
-        params1.put("y", 0.9f);
-        params1.put("duration", 500L);
-        PredictiveActionSystem.GameAction action1 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.LONG_PRESS, 
-                        params1, 1.0f, 0.9f);
-        sequence.addAction(action1);
-        
-        // Swipe pattern
+        params1.put("x", 0.90f);
+        params1.put("y", 0.88f);
+        params1.put("duration", 520L);
+        params1.put("label", "charge_special");
+        sequence.addAction(new PredictiveActionSystem.GameAction("LONG_PRESS", params1, 1.0f));
+
+        // Release energy — directional swipe across centre
         Map<String, Object> params2 = new HashMap<>();
-        params2.put("startX", 0.3f);
-        params2.put("startY", 0.5f);
-        params2.put("endX", 0.7f);
-        params2.put("endY", 0.5f);
+        params2.put("startX", 0.28f);
+        params2.put("startY", 0.50f);
+        params2.put("endX",   0.72f);
+        params2.put("endY",   0.50f);
         params2.put("duration", 150L);
-        PredictiveActionSystem.GameAction action2 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.SWIPE, 
-                        params2, 1.0f, 0.9f);
-        sequence.addAction(action2);
-        
-        // Tap to confirm
+        params2.put("label", "release_swipe");
+        sequence.addAction(new PredictiveActionSystem.GameAction("SWIPE", params2, 1.0f));
+
+        // Final confirm tap (centre screen — activates area-of-effect)
         Map<String, Object> params3 = new HashMap<>();
-        params3.put("x", 0.5f);
-        params3.put("y", 0.5f);
-        PredictiveActionSystem.GameAction action3 = 
-                new PredictiveActionSystem.GameAction(
-                        PredictiveActionSystem.ActionType.TAP, 
-                        params3, 1.0f, 0.9f);
-        sequence.addAction(action3);
-        
-        // Set timing for precise execution
-        sequence.setTimingOffsets(new long[] {0, 600, 800});
-        
-        // Set very high priority
+        params3.put("x", 0.50f);
+        params3.put("y", 0.50f);
+        params3.put("label", "aoe_confirm");
+        sequence.addAction(new PredictiveActionSystem.GameAction("TAP", params3, 1.0f));
+
+        sequence.setTimingOffsets(new long[]{0L, 600L, 800L});
         sequence.setPriority(1.0f);
-        
-        // Make non-interruptible
         sequence.setInterruptible(false);
-        
-        // Set game context
         sequence.setGameContext("special");
     }
     

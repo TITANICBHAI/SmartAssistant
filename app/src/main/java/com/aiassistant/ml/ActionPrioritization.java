@@ -676,20 +676,24 @@ public class ActionPrioritization {
                 }
             }
             
-            // Determine action type
-            PredictiveActionSystem.ActionType actionType = PredictiveActionSystem.ActionType.TAP;
+            // Determine action type as string (compatible with rewritten PredictiveActionSystem)
+            String actionType = "TAP";
             if (params.containsKey("action_type")) {
                 String type = params.get("action_type").toString().toLowerCase();
                 if (type.contains("swipe")) {
-                    actionType = PredictiveActionSystem.ActionType.SWIPE;
+                    actionType = "SWIPE";
                 } else if (type.contains("long") || type.contains("press")) {
-                    actionType = PredictiveActionSystem.ActionType.LONG_PRESS;
+                    actionType = "LONG_PRESS";
+                } else if (type.contains("scroll")) {
+                    actionType = "SCROLL";
+                } else if (type.contains("drag")) {
+                    actionType = "DRAG";
                 }
             }
-            
-            // Create action
+
+            // Create action using the current 3-arg constructor
             return new PredictiveActionSystem.GameAction(
-                    actionType, params, rule.getConfidence(), rule.getConfidence());
+                    actionType, params, rule.getConfidence());
             
         } catch (Exception e) {
             Log.e(TAG, "Error creating action from rule: " + e.getMessage());

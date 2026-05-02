@@ -547,14 +547,21 @@ public class OptimizedImageProcessor {
                 });
             }
             
-            // Execute tasks in parallel
+            // Execute tasks in parallel and wait for ALL of them to finish
+            java.util.concurrent.CountDownLatch latch =
+                    new java.util.concurrent.CountDownLatch(tasks.size());
+            for (Runnable task : tasks) {
+                executorService.execute(() -> {
+                    try { task.run(); }
+                    finally { latch.countDown(); }
+                });
+            }
             try {
-                for (Runnable task : tasks) {
-                    executorService.execute(task);
+                // Wait up to 200 ms for all regions to be processed
+                boolean finished = latch.await(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (!finished) {
+                    Log.w(TAG, "Region processing timed out; some regions may be unprocessed");
                 }
-                
-                // Wait for completion (with timeout)
-                Thread.sleep(50); // Short wait time for parallel processing
             } catch (InterruptedException e) {
                 Log.e(TAG, "Region processing interrupted: " + e.getMessage());
                 Thread.currentThread().interrupt();
@@ -567,6 +574,155 @@ public class OptimizedImageProcessor {
         }
     }
     
+    /**
+     * Extract a compact normalized feature vector from a bitmap.
+     * Divides the image into a grid and computes mean R, G, B per cell.
+     * Result length = gridCols * gridRows * 3.
+     *
+     * @param input    Source bitmap.
+     * @param gridCols Number of horizontal grid cells.
+     * @param gridRows Number of vertical grid cells.
+     * @return Normalized float[] in [0,1], length = gridCols*gridRows*3.
+     */
+    public float[] extractFeatureVector(Bitmap input, int gridCols, int gridRows) {
+        if (input == null || gridCols <= 0 || gridRows <= 0) return new float[0];
+        int w    = input.getWidth();
+        int h    = input.getHeight();
+        int cellW = Math.max(1, w / gridCols);
+        int cellH = Math.max(1, h / gridRows);
+        float[] features = new float[gridCols * gridRows * 3];
+        int idx = 0;
+        for (int gy = 0; gy < gridRows; gy++) {
+            for (int gx = 0; gx < gridCols; gx++) {
+                long sumR = 0, sumG = 0, sumB = 0;
+                int count = 0;
+                int x0 = gx * cellW, y0 = gy * cellH;
+                int x1 = Math.min(x0 + cellW, w);
+                int y1 = Math.min(y0 + cellH, h);
+                for (int y = y0; y < y1; y += 2) {
+                    for (int x = x0; x < x1; x += 2) {
+                        int px = input.getPixel(x, y);
+                        sumR += android.graphics.Color.red(px);
+                        sumG += android.graphics.Color.green(px);
+                        sumB += android.graphics.Color.blue(px);
+                        count++;
+                    }
+                }
+                if (count > 0) {
+                    features[idx++] = sumR / (255f * count);
+                    features[idx++] = sumG / (255f * count);
+                    features[idx++] = sumB / (255f * count);
+                } else {
+                    idx += 3;
+                }
+            }
+        }
+        return features;
+    }
+
+    /**
+     * Compute a per-pixel motion magnitude map between two frames.
+     * Each output value = (|ΔR| + |ΔG| + |ΔB|) / (3 * 255), clamped to [0, 1].
+     * Downsampled by {@code step} for performance.
+     *
+     * @param current  Current frame bitmap.
+     * @param previous Previous frame bitmap.
+     * @param step     Pixel sampling stride (2–8 recommended).
+     * @return float[] row-major motion map of size (w/step) * (h/step).
+     */
+    public float[] computeMotionMap(Bitmap current, Bitmap previous, int step) {
+        if (current == null || previous == null) return new float[0];
+        step = Math.max(1, step);
+        int w    = current.getWidth();
+        int h    = current.getHeight();
+        int cols = w / step;
+        int rows = h / step;
+        float[] map = new float[cols * rows];
+        int idx = 0;
+        for (int y = 0; y < rows; y++) {
+            for (int x = 0; x < cols; x++) {
+                int px = x * step, py = y * step;
+                int c  = current.getPixel(px, py);
+                int p  = previous.getPixel(px, py);
+                int diff = Math.abs(android.graphics.Color.red(c)   - android.graphics.Color.red(p))
+                         + Math.abs(android.graphics.Color.green(c) - android.graphics.Color.green(p))
+                         + Math.abs(android.graphics.Color.blue(c)  - android.graphics.Color.blue(p));
+                map[idx++] = diff / (3f * 255f);
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Apply unsharp-mask sharpening to enhance edges.
+     * Sharpened = original + amount * (original − blurred).
+     * Falls back to software sharpening when RenderScript is unavailable.
+     *
+     * @param input  Source bitmap.
+     * @param amount Sharpening strength in [0, 3].
+     * @return New sharpened bitmap.
+     */
+    public Bitmap applySharpen(Bitmap input, float amount) {
+        if (input == null) return null;
+        amount = Math.max(0f, Math.min(3f, amount));
+        try {
+            // Blur first, then blend for unsharp mask
+            Bitmap blurred = applyBlur(input, 2.5f);
+            int w = input.getWidth();
+            int h = input.getHeight();
+            int[] orig = new int[w * h];
+            int[] blur = new int[w * h];
+            input.getPixels(orig, 0, w, 0, 0, w, h);
+            blurred.getPixels(blur, 0, w, 0, 0, w, h);
+            int[] out = new int[w * h];
+            for (int i = 0; i < orig.length; i++) {
+                int ao = (orig[i] >> 24) & 0xff;
+                int ro = (orig[i] >> 16) & 0xff;
+                int go = (orig[i] >>  8) & 0xff;
+                int bo =  orig[i]        & 0xff;
+                int rb = (blur[i] >> 16) & 0xff;
+                int gb = (blur[i] >>  8) & 0xff;
+                int bb =  blur[i]        & 0xff;
+                int r = clampChannel((int)(ro + amount * (ro - rb)));
+                int g = clampChannel((int)(go + amount * (go - gb)));
+                int b = clampChannel((int)(bo + amount * (bo - bb)));
+                out[i] = (ao << 24) | (r << 16) | (g << 8) | b;
+            }
+            Bitmap result = Bitmap.createBitmap(w, h, input.getConfig());
+            result.setPixels(out, 0, w, 0, 0, w, h);
+            if (!blurred.isRecycled()) blurred.recycle();
+            return result;
+        } catch (Exception e) {
+            Log.e(TAG, "Error sharpening: " + e.getMessage());
+            return input;
+        }
+    }
+
+    /**
+     * Compute a 256-bin RGB color histogram.
+     * Returns int[768]: bins 0–255 = R, 256–511 = G, 512–767 = B.
+     * Sampling step controls speed (step=4 → ~6% of pixels sampled).
+     */
+    public int[] extractColorHistogram(Bitmap input, int step) {
+        if (input == null) return new int[768];
+        step = Math.max(1, step);
+        int[] hist = new int[768];
+        int w = input.getWidth(), h = input.getHeight();
+        for (int y = 0; y < h; y += step) {
+            for (int x = 0; x < w; x += step) {
+                int px = input.getPixel(x, y);
+                hist[android.graphics.Color.red(px)]           ++;
+                hist[256 + android.graphics.Color.green(px)]   ++;
+                hist[512 + android.graphics.Color.blue(px)]    ++;
+            }
+        }
+        return hist;
+    }
+
+    private static int clampChannel(int v) {
+        return Math.max(0, Math.min(255, v));
+    }
+
     /**
      * Get processing statistics
      */

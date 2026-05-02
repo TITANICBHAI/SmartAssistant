@@ -266,8 +266,56 @@ android/              # Mock Android SDK shims (for non-Android compilation)
 - **Bessel-corrected sample variance** and `isOutlier()` convenience method.
 
 ### New: com.aiassistant.ml.TransferLearningAdapter
+
 - **Feature alignment API** — `FeatureAlignment` interface maps source → target dimensions; built-in MODULO, IDENTITY, and NO_ALIGNMENT strategies.
 - **τ-decay blending** — `Q_blend = (1−τ)·Q_target + τ·Q_source`; τ decays exponentially over DECAY_STEPS=500 target-game steps.
 - **Negative-transfer protection** — per-action success tracking; actions whose transferred success rate < 0.35 have τ zeroed for that action.
 - **Running normalisation** — per-source-feature min/max tracked to prevent scale mismatch.
 - **`getStats()`** exposes τ, target steps, per-action transfer stats.
+
+## Major Improvements Log (Session 5)
+
+### EnemyDetector.java — detectEnemiesWithShape() fully implemented
+- **Sobel edge detection** — grayscale luminance map at configurable step (2px normal / 4px low-power), then 3×3 Sobel kernels compute horizontal + vertical gradient magnitude.
+- **Connected-component BFS** — 8-directional flood-fill on the edge map finds candidate blobs.
+- **Shape heuristics** — aspect ratio (0.5–4.0), area (0.05–20% of image), and edge density (8–85%) filter false positives; only sprite-like regions kept.
+- **Overlapping-rect suppression** — merged via existing `removeOverlappingRects()`.
+
+### GamePatternRecognizer.java — 5 stub methods → real implementations
+- **checkStrategyPatterns()** — scans rolling observations for consistent `playerAction → outcome` pairs; registers new `GameStrategyPattern` when average outcome > 0.5.
+- **checkLevelPatterns()** — aggregates per-level obstacle/resource counts; detects level fingerprints after ≥5 observations.
+- **analyzeEnemyPatterns()** — groups all sightings by enemy type; computes average velocity, dominant direction, and attack rate; generates counter-strategy advice.
+- **analyzeStrategyPatterns()** — builds action→outcome statistics across all observations; updates existing pattern confidences via EMA; registers new high-value patterns.
+- **analyzeLevelPatterns()** — deep per-level aggregation with obstacle density score; derives navigation hint (high/mixed/open terrain).
+
+### AdvancedActionSequencer.java — ActionType compatibility fixed + combos improved
+- Replaced all `PredictiveActionSystem.ActionType.TAP/SWIPE/LONG_PRESS` enum references with string literals `"TAP"/"SWIPE"/"LONG_PRESS"` to match rewritten `PredictiveActionSystem.GameAction(String, Map, float)` API.
+- `createAttackCombo` — 3-hit timing (0/300/600 ms), escalating tap positions, finisher at 0.95 priority.
+- `createDefenseCombo` — block → dodge-roll swipe → counter-attack at 200/500 ms.
+- `createMovementCombo` — sidestep-left → jump → sidestep-right at 250/500 ms.
+- `createSpecialCombo` — 520 ms charge long-press → full-width release swipe → AoE confirm tap.
+
+### ActionPrioritization.java — createActionFromRule() API-compatibility fix
+- Replaced deprecated `PredictiveActionSystem.ActionType` enum with string action types; also added `SCROLL` and `DRAG` type detection.
+- Switched from 4-arg to 3-arg `GameAction` constructor.
+
+### OptimizedImageProcessor.java — processRegionsOfInterest() race-condition fix
+- Replaced broken `Thread.sleep(50)` wait with `CountDownLatch`; each region worker decrements the latch on completion; main thread waits up to 200 ms with `latch.await()`.
+- Truly parallel region processing is now guaranteed to complete before returning.
+
+### New Classes (Session 5) — 10 new Java files
+
+| Class | Package | Purpose |
+|-------|---------|---------|
+| `MemoryReplayBuffer` | ml | Sum-tree PER: O(log N) prioritized sampling, IS-weight bias correction, β annealing |
+| `PolicyGradientOptimizer` | ml | REINFORCE + learned baseline; entropy bonus; gradient clipping; EMA stats |
+| `PerceptionEngine` | core | Parallel 3-channel perception (enemies, UI, patterns); frame-skip; listener API |
+| `GameStateEncoder` | ml | State map → normalized float[]: numeric/bool/categorical, Welford normalization, delta features, frame stacking |
+| `NeuralNetworkOptimizer` | ml | Adam / SGD / RMSProp / AdamW optimizer: per-group momentum, bias correction, weight decay |
+| `AdaptiveExplorationStrategy` | ml | Meta-bandit over ε-greedy / UCB1 / Boltzmann / Thompson Sampling; UCB1 meta-selection with warm-up |
+| `RewardCalculator` | ml | Multi-signal reward: extrinsic + curiosity (1/√visits) + potential shaping + smoothness + time + survival; Welford normalization per component |
+| `ModelEnsemble` | ml | Weighted-confidence ensemble of RL model outputs; online weight rebalancing |
+| `ScreenRegionAnalyzer` | ml | Screen zone partitioning with per-zone color stats, brightness, and activity scoring |
+| `OnlineMetaLearner` | ml | MAML-inspired fast adaptation: per-context parameter sets, few-shot fine-tuning |
+
+- **Source Files:** 220+ Java source files across 17 packages
